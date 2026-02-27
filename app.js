@@ -1,12 +1,10 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.2.1)
+   Earthview from the Moon — Canvas Renderer  (v0.2.2)
    ============================================================
-   Changes from v0.2.0:
-   - Image source: earth-clean.jpg
-   - Shadow strictly clipped inside globe circle
-   - Earth rotation direction: counterclockwise (correct for Moon)
-   - Procellarum position: east=left in sky convention
-   - Date label moved above horizon
+   Changes from v0.2.1:
+   - Earth rotation: horizontal scroll (polar-axis), not spin
+   - Idle phase linked to start date picker
+   - East/west positioning corrected (east=right on canvas)
    ============================================================ */
 
 (function () {
@@ -49,12 +47,39 @@
     const OBLIQUITY = 23.44;
 
     /* ==========================================================
-       EARTH IMAGE
+       EARTH IMAGE — pre-processed to remove checkerboard corners
        ========================================================== */
     const earthImg = new Image();
     earthImg.src = 'earth-clean.jpg';
     let earthImgLoaded = false;
-    earthImg.onload = () => { earthImgLoaded = true; };
+
+    /* Offscreen canvas holds the cleaned image (checkerboard corners
+       replaced with ocean blue so horizontal scroll tiling looks clean). */
+    let earthCanvas = null;
+
+    earthImg.onload = () => {
+        const w = earthImg.naturalWidth;
+        const h = earthImg.naturalHeight;
+        earthCanvas = document.createElement('canvas');
+        earthCanvas.width = w;
+        earthCanvas.height = h;
+        const oc = earthCanvas.getContext('2d');
+
+        // 1. Fill entire canvas with ocean blue
+        oc.fillStyle = '#3A7BD5';
+        oc.fillRect(0, 0, w, h);
+
+        // 2. Clip to a tight circle inside the painted globe surface
+        //    (92% radius avoids the shadow border where checkerboard leaks)
+        oc.save();
+        oc.beginPath();
+        oc.arc(w / 2, h / 2, Math.min(w, h) * 0.46, 0, Math.PI * 2);
+        oc.clip();
+        oc.drawImage(earthImg, 0, 0);
+        oc.restore();
+
+        earthImgLoaded = true;
+    };
 
     /* ==========================================================
        STARS
@@ -94,22 +119,30 @@
        Sub-Earth point ≈ 0°N, 0°E.
        Elevation = 90° − angular_distance.
        Azimuth maps to horizontal position.
-       Sky convention: East = LEFT, West = RIGHT.
+
+       Canvas convention (observer looking at the sky):
+         LEFT  = WEST      RIGHT = EAST
+         TOP   = high elev  BOTTOM = near horizon
+
+       Observer at Procellarum (57°W): sub-Earth is 57° to
+       the EAST → Earth appears east → RIGHT side of canvas.
+       Observer at Tranquility (31°E): sub-Earth is 31° to
+       the WEST → Earth appears west → LEFT side of canvas.
 
        Location               Coords        Dist  Elev  Az     X%   Y%   Scale
-       Sea of Tranquility     8°N, 31°E     ~32°  58°   West   62   25   1.0
-       Oceanus Procellarum    18°N, 57°W    ~60°  30°   East   25   55   0.92
+       Sea of Tranquility     8°N, 31°E     ~32°  58°   West   30   25   1.0
+       Oceanus Procellarum    18°N, 57°W    ~60°  30°   East   75   55   0.92
        Lunar South Pole       90°S, 0°      ~84°   6°   North  50   68   0.82
        Far Side (Moscoviense) 27°N, 148°E   ~150° <0°   —      —    —    0
        ========================================================== */
     const LOCATIONS = {
-        tranquility: { xRatio: 0.62, yRatio: 0.25, scale: 1.0 },
-        procellarum: { xRatio: 0.25, yRatio: 0.55, scale: 0.92 },
+        tranquility: { xRatio: 0.30, yRatio: 0.25, scale: 1.0 },
+        procellarum: { xRatio: 0.75, yRatio: 0.55, scale: 0.92 },
         southpole: { xRatio: 0.50, yRatio: 0.68, scale: 0.82 },
         farside: { xRatio: 0.50, yRatio: -1, scale: 0 },
     };
 
-    let current = { xRatio: 0.62, yRatio: 0.25, scale: 1.0 };
+    let current = { xRatio: 0.30, yRatio: 0.25, scale: 1.0 };
     let target = { ...current };
     const LERP = 0.045;
     function lerp(a, b, t) { return a + (b - a) * t; }
@@ -222,19 +255,26 @@
     function drawEarth(cx, cy, r, phaseDeg, rotDeg, tiltDeg) {
         if (!earthImgLoaded) return;
 
+        const imgSize = r * 2.2;
+
         /* --- Single circular clip for image + shadow + highlight --- */
         ctx.save();
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.clip();
 
-        /* -- Image (counterclockwise rotation = east-to-west drift) -- */
-        ctx.save();
-        ctx.translate(cx, cy);
-        ctx.rotate((-rotDeg * Math.PI) / 180);   // negative = CCW = correct
-        const imgSize = r * 2.2;
-        ctx.drawImage(earthImg, -imgSize / 2, -imgSize / 2, imgSize, imgSize);
-        ctx.restore();
+        /* -- Polar-axis rotation via horizontal scroll --
+           Features drift RIGHT → LEFT (as seen from the Moon).
+           Uses pre-processed earthCanvas (ocean-blue corners instead
+           of checkerboard). Three copies for seamless wrap. */
+        const scrollFrac = ((rotDeg % 360) + 360) % 360 / 360;
+        const scrollX = scrollFrac * imgSize;
+
+        for (let i = -1; i <= 1; i++) {
+            ctx.drawImage(earthCanvas,
+                cx - imgSize / 2 - scrollX + i * imgSize, cy - imgSize / 2,
+                imgSize, imgSize);
+        }
 
         /* -- Specular highlight (inside same clip) -- */
         const hg = ctx.createRadialGradient(
@@ -490,7 +530,15 @@
         current.scale = lerp(current.scale, target.scale, LERP);
 
         // Determine current date for astronomy
-        const renderDate = isPlaying ? currentDate : new Date();
+        // When idle, use the start-date picker so the phase is always
+        // linked to the Mission Window, not the real clock.
+        let renderDate;
+        if (isPlaying) {
+            renderDate = currentDate;
+        } else {
+            const startVal = startIn.value;
+            renderDate = startVal ? new Date(startVal + 'T12:00:00') : new Date();
+        }
 
         // Compute astronomy
         const phaseDeg = phaseForDate(renderDate);

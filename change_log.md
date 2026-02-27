@@ -16,6 +16,22 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.2.2] — 2026-02-25
+
+### 🔧 Rotation, Phase Link & East/West Correction
+
+### Fixed (Patch)
+- **Earth rotation**: Restored polar-axis rotation via horizontal image scrolling (continents drift right-to-left as seen from the Moon). Pre-processes image at load time to replace checkerboard corners with ocean blue for seamless tiling.
+- **Phase linked to start date**: When idle, the Earth's phase now reflects the date in the "Start Date" picker instead of the real-time clock.
+- **East/West positioning corrected**:
+  - **Oceanus Procellarum** (Moon's western limb) → Earth in the **eastern** sky → right side of canvas (X:75%).
+  - **Sea of Tranquility** (Moon's eastern limb) → Earth in the **western** sky → left side of canvas (X:30%).
+  - Canvas convention clarified: LEFT = WEST, RIGHT = EAST.
+
+### Changed (Patch)
+- **Image preprocessing**: Earth image loaded via offscreen canvas — fills ocean-blue background, clips a tight circle (92% radius) of the painted globe, eliminating original JPEG's checkerboard artefact corners.
+
+---
 ## [0.2.1] — 2026-02-25
 
 ### 🔧 Visual & Astronomical Fixes
