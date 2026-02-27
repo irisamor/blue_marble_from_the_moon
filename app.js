@@ -1,5 +1,5 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.5.3)
+   Earthview from the Moon — Canvas Renderer  (v0.5.4)
    ============================================================
    Changes from v0.4.0:
    - Mission Control side-panel dashboard
@@ -69,30 +69,55 @@
        ========================================================== */
     const earthImg = new Image();
     earthImg.src = 'earth-blue-marble.jpg';
+    const earthNightImg = new Image();
+    earthNightImg.src = 'earth-lights.png';
     let earthImgLoaded = false;
     let earthCanvas = null;
+    let earthNightCanvas = null;
     let surfaceCanvas = null;
 
     let sphereCanvas = null;
     let sphereCtx = null;
+    let sphereNightCanvas = null;
+    let sphereNightCtx = null;
     let sphereMap = null; // { u, v } lookup array
     const SPHERE_SIZE = 512;
     const SPHERE_R = SPHERE_SIZE / 2;
 
-    earthImg.onload = () => {
+    let loadedCount = 0;
+    const checkLoad = () => {
+        loadedCount++;
+        if (loadedCount === 2) initSphereAndCanvases();
+    };
+    earthImg.onload = checkLoad;
+    earthNightImg.onload = checkLoad;
+
+    function initSphereAndCanvases() {
         const w = earthImg.naturalWidth;
         const h = earthImg.naturalHeight;
+
         earthCanvas = document.createElement('canvas');
         earthCanvas.width = w;
         earthCanvas.height = h;
-        const oc = earthCanvas.getContext('2d', { willReadFrequently: true });
-        oc.drawImage(earthImg, 0, 0);
+        const oc1 = earthCanvas.getContext('2d', { willReadFrequently: true });
+        oc1.drawImage(earthImg, 0, 0);
+
+        earthNightCanvas = document.createElement('canvas');
+        earthNightCanvas.width = earthNightImg.naturalWidth;
+        earthNightCanvas.height = earthNightImg.naturalHeight;
+        const oc2 = earthNightCanvas.getContext('2d', { willReadFrequently: true });
+        oc2.drawImage(earthNightImg, 0, 0);
 
         // Pre-compute orthographic UV map
         sphereCanvas = document.createElement('canvas');
         sphereCanvas.width = SPHERE_SIZE;
         sphereCanvas.height = SPHERE_SIZE;
         sphereCtx = sphereCanvas.getContext('2d');
+
+        sphereNightCanvas = document.createElement('canvas');
+        sphereNightCanvas.width = SPHERE_SIZE;
+        sphereNightCanvas.height = SPHERE_SIZE;
+        sphereNightCtx = sphereNightCanvas.getContext('2d');
 
         sphereMap = new Float32Array(SPHERE_SIZE * SPHERE_SIZE * 2);
         let ptr = 0;
@@ -120,7 +145,7 @@
         }
 
         earthImgLoaded = true;
-    };
+    }
 
     let lastRenderedRot = -999;
     function updateSphereCanvas(rotDeg) {
@@ -132,11 +157,21 @@
         const srcCtx = earthCanvas.getContext('2d');
         const srcData = srcCtx.getImageData(0, 0, earthCanvas.width, earthCanvas.height);
         const sData = srcData.data;
+
+        const srcNightCtx = earthNightCanvas.getContext('2d');
+        const srcNightData = srcNightCtx.getImageData(0, 0, earthNightCanvas.width, earthNightCanvas.height);
+        const snData = srcNightData.data;
+
         const srcW = earthCanvas.width;
         const srcH = earthCanvas.height;
+        const snW = earthNightCanvas.width;
+        const snH = earthNightCanvas.height;
 
         const destData = sphereCtx.createImageData(SPHERE_SIZE, SPHERE_SIZE);
         const dData = destData.data;
+
+        const destNightData = sphereNightCtx.createImageData(SPHERE_SIZE, SPHERE_SIZE);
+        const dnData = destNightData.data;
 
         // Base rotation offset U (0.0 to 1.0)
         const rotU = ((rotDeg % 360) + 360) % 360 / 360.0;
@@ -157,16 +192,30 @@
                 const py = Math.floor(v * (srcH - 1));
                 const pIdx = (py * srcW + px) * 4;
 
-                dData[dPtr++] = sData[pIdx];
-                dData[dPtr++] = sData[pIdx + 1];
-                dData[dPtr++] = sData[pIdx + 2];
-                dData[dPtr++] = 255; // solid alpha
+                dData[dPtr] = sData[pIdx];
+                dData[dPtr + 1] = sData[pIdx + 1];
+                dData[dPtr + 2] = sData[pIdx + 2];
+                dData[dPtr + 3] = 255; // solid alpha
+
+                const pnx = Math.floor(u * (snW - 1));
+                const pny = Math.floor(v * (snH - 1));
+                const pnIdx = (pny * snW + pnx) * 4;
+
+                dnData[dPtr] = snData[pnIdx];
+                dnData[dPtr + 1] = snData[pnIdx + 1];
+                dnData[dPtr + 2] = snData[pnIdx + 2];
+                dnData[dPtr + 3] = 255;
+
+                dPtr += 4;
             } else {
                 // Outside sphere
-                dData[dPtr++] = 0; dData[dPtr++] = 0; dData[dPtr++] = 0; dData[dPtr++] = 0;
+                dData[dPtr] = 0; dData[dPtr + 1] = 0; dData[dPtr + 2] = 0; dData[dPtr + 3] = 0;
+                dnData[dPtr] = 0; dnData[dPtr + 1] = 0; dnData[dPtr + 2] = 0; dnData[dPtr + 3] = 0;
+                dPtr += 4;
             }
         }
         sphereCtx.putImageData(destData, 0, 0);
+        sphereNightCtx.putImageData(destNightData, 0, 0);
     }
 
     /* ==========================================================
@@ -525,8 +574,25 @@
                 Math.PI / 2, -Math.PI / 2, d < 270);
         }
         ctx.closePath();
+
+        ctx.clip(); // Mask everything inside the night-time shadow path
+
+        // 1. Draw the darkening black shadow
         ctx.fillStyle = C.shadow;
         ctx.fill();
+
+        // 2. Draw the glowing city lights (screen blend to keep it bright)
+        if (sphereNightCanvas) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen';
+            // un-rotate the tilt so the texture aligns with the Earth equator
+            ctx.translate(cx, cy);
+            ctx.rotate((-tiltDeg * Math.PI) / 180);
+            ctx.rotate(axisTiltDeg * DEG); // add back Earth axis tilt
+            ctx.translate(-cx, -cy);
+            ctx.drawImage(sphereNightCanvas, cx - r, cy - r, r * 2, r * 2);
+            ctx.restore();
+        }
 
         ctx.restore();
     }

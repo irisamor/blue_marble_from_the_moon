@@ -16,6 +16,16 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.5.4] — 2026-02-27
+
+### 🏙️ City Lights on the Night Side
+
+### Added (Minor)
+- **Night-side illumination**: Implemented a global city lights layer using NASA's "Black Marble" dataset (`earth-lights.png`).
+- **Dynamic shadow masking**: The custom orthographic engine now synchronously renders the night texture. The day/night terminator boundary mathematically calculated in `drawPhaseShadowInClip()` serves as a hard `clip()` mask, ensuring that glowing city lights appear strictly on the night side of the Earth and elegantly fade away as continents rotate into daylight.
+
+---
+
 ## [0.5.3] — 2026-02-27
 
 ### 🌐 Orthographic Projection Engine
