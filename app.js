@@ -1,5 +1,5 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.5.2)
+   Earthview from the Moon — Canvas Renderer  (v0.5.3)
    ============================================================
    Changes from v0.4.0:
    - Mission Control side-panel dashboard
@@ -73,16 +73,101 @@
     let earthCanvas = null;
     let surfaceCanvas = null;
 
+    let sphereCanvas = null;
+    let sphereCtx = null;
+    let sphereMap = null; // { u, v } lookup array
+    const SPHERE_SIZE = 512;
+    const SPHERE_R = SPHERE_SIZE / 2;
+
     earthImg.onload = () => {
         const w = earthImg.naturalWidth;
         const h = earthImg.naturalHeight;
         earthCanvas = document.createElement('canvas');
         earthCanvas.width = w;
         earthCanvas.height = h;
-        const oc = earthCanvas.getContext('2d');
+        const oc = earthCanvas.getContext('2d', { willReadFrequently: true });
         oc.drawImage(earthImg, 0, 0);
+
+        // Pre-compute orthographic UV map
+        sphereCanvas = document.createElement('canvas');
+        sphereCanvas.width = SPHERE_SIZE;
+        sphereCanvas.height = SPHERE_SIZE;
+        sphereCtx = sphereCanvas.getContext('2d');
+
+        sphereMap = new Float32Array(SPHERE_SIZE * SPHERE_SIZE * 2);
+        let ptr = 0;
+        for (let y = 0; y < SPHERE_SIZE; y++) {
+            const ny = (y - SPHERE_R) / SPHERE_R;
+            for (let x = 0; x < SPHERE_SIZE; x++) {
+                const nx = (x - SPHERE_R) / SPHERE_R;
+                const d2 = nx * nx + ny * ny;
+                if (d2 <= 1.0) {
+                    const z = Math.sqrt(1.0 - d2);
+                    const lat = Math.asin(-ny); // -pi/2 to pi/2
+                    const lon = Math.atan2(nx, z); // -pi/2 to pi/2
+
+                    // Map to equirectangular UV (0.0 to 1.0)
+                    const u = (lon / (Math.PI * 2)); // Centered offset
+                    const v = 0.5 - (lat / Math.PI);
+
+                    sphereMap[ptr++] = u;
+                    sphereMap[ptr++] = v;
+                } else {
+                    sphereMap[ptr++] = -1;
+                    sphereMap[ptr++] = -1;
+                }
+            }
+        }
+
         earthImgLoaded = true;
     };
+
+    let lastRenderedRot = -999;
+    function updateSphereCanvas(rotDeg) {
+        if (!earthImgLoaded) return;
+        // Optimization: only redraw pixel map if rotation changes significantly (0.1 deg = ~1px)
+        if (Math.abs(rotDeg - lastRenderedRot) < 0.1) return;
+        lastRenderedRot = rotDeg;
+
+        const srcCtx = earthCanvas.getContext('2d');
+        const srcData = srcCtx.getImageData(0, 0, earthCanvas.width, earthCanvas.height);
+        const sData = srcData.data;
+        const srcW = earthCanvas.width;
+        const srcH = earthCanvas.height;
+
+        const destData = sphereCtx.createImageData(SPHERE_SIZE, SPHERE_SIZE);
+        const dData = destData.data;
+
+        // Base rotation offset U (0.0 to 1.0)
+        const rotU = ((rotDeg % 360) + 360) % 360 / 360.0;
+
+        let sPtr = 0; // sphere map pointer
+        let dPtr = 0; // dest pixel pointer
+        for (let i = 0; i < SPHERE_SIZE * SPHERE_SIZE; i++) {
+            let uOff = sphereMap[sPtr++];
+            let v = sphereMap[sPtr++];
+
+            if (v >= 0) {
+                // Apply rotation
+                let u = uOff + rotU;
+                if (u > 1.0) u -= 1.0;
+                else if (u < 0.0) u += 1.0;
+
+                const px = Math.floor(u * (srcW - 1));
+                const py = Math.floor(v * (srcH - 1));
+                const pIdx = (py * srcW + px) * 4;
+
+                dData[dPtr++] = sData[pIdx];
+                dData[dPtr++] = sData[pIdx + 1];
+                dData[dPtr++] = sData[pIdx + 2];
+                dData[dPtr++] = 255; // solid alpha
+            } else {
+                // Outside sphere
+                dData[dPtr++] = 0; dData[dPtr++] = 0; dData[dPtr++] = 0; dData[dPtr++] = 0;
+            }
+        }
+        sphereCtx.putImageData(destData, 0, 0);
+    }
 
     /* ==========================================================
        STARS
@@ -383,27 +468,23 @@
         ctx.rotate(axisTiltDeg * DEG);
         ctx.translate(-cx, -cy);
 
-        const mapW = r * 4;
-        const mapH = r * 2;
-        const scrollFrac = ((rotDeg % 360) + 360) % 360 / 360;
-        const scrollX = scrollFrac * mapW;
+        // Update the 3D projection matrix map
+        updateSphereCanvas(rotDeg);
 
-        for (let i = -1; i <= 1; i++) {
-            ctx.drawImage(earthCanvas,
-                cx - mapW / 2 - scrollX + i * mapW, cy - mapH / 2,
-                mapW, mapH);
-        }
+        // Draw the mapped sphere image
+        ctx.drawImage(sphereCanvas, cx - r, cy - r, r * 2, r * 2);
 
         ctx.restore();
 
-        // Atmospheric rim (pure light, no darkening) to preserve Blue Marble brightness
+        // Atmospheric rim with a subtle center glow to prevent dark illusion
         const hg = ctx.createRadialGradient(
-            cx, cy, r * 0.6,
+            cx, cy, 0,
             cx, cy, r
         );
-        hg.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        hg.addColorStop(0, 'rgba(255, 255, 255, 0.08)');  // Very soft center glow
+        hg.addColorStop(0.6, 'rgba(255, 255, 255, 0)');
         hg.addColorStop(0.85, 'rgba(80, 180, 255, 0.1)');
-        hg.addColorStop(1, 'rgba(100, 200, 255, 0.4)');
+        hg.addColorStop(1, 'rgba(100, 200, 255, 0.35)');
         ctx.fillStyle = hg;
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);

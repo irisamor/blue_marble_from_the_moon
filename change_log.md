@@ -16,6 +16,18 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.5.3] — 2026-02-27
+
+### 🌐 Orthographic Projection Engine
+
+### Added (Patch)
+- **Real-time 3D spherical projection**: Implemented a custom 60fps JavaScript `sphereMap` rendering engine. Earth is now mathematically projected as a true 3D orthographic sphere instead of a flat 2D cylinder slice. This perfectly fixes the massively stretched/distorted polar ice caps inherent to equirectangular maps.
+
+### Changed (Patch)
+- **Illumination model**: Modified the atmospheric radial additive glow to include a very subtle white center fill (opacity 0.08). This counteracts an optical illusion where the sharp contrast of the bright edge rim caused the center of the "Full Earth" to look artificially shaded.
+
+---
+
 ## [0.5.2] — 2026-02-27
 
 ### ✨ Blue Marble Aesthetics
