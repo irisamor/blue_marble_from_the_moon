@@ -1,12 +1,12 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.4.0)
+   Earthview from the Moon — Canvas Renderer  (v0.5.1)
    ============================================================
-   Changes from v0.3.0:
-   - Equirectangular Earth map for full-globe rotation
-   - Proper optical libration (eccentricity + inclination)
-   - Seasonal Earth axial tilt rendering
-   - Variable Earth apparent size (perigee/apogee)
-   - Proper terminator tilt (Sun–Earth–Moon geometry)
+   Changes from v0.4.0:
+   - Mission Control side-panel dashboard
+   - Custom observer lat/lon with presets
+   - Orbital bird's-eye mini-map (Sun–Earth–Moon)
+   - Synodic cycle timeline bar
+   - Extended data readouts (distance, elevation, azimuth)
    ============================================================ */
 
 (function () {
@@ -16,6 +16,8 @@
     const canvas = document.getElementById('scene');
     const ctx = canvas.getContext('2d');
     const locSel = document.getElementById('location-select');
+    const obsLatIn = document.getElementById('obs-lat');
+    const obsLonIn = document.getElementById('obs-lon');
     const startIn = document.getElementById('start-date');
     const endIn = document.getElementById('end-date');
     const playBtn = document.getElementById('play-btn');
@@ -24,7 +26,14 @@
     const statDate = document.getElementById('stat-date');
     const statPhase = document.getElementById('stat-phase');
     const statIllum = document.getElementById('stat-illum');
+    const statDist = document.getElementById('stat-dist');
     const statLibration = document.getElementById('stat-libration');
+    const statElev = document.getElementById('stat-elev');
+    const statAzimuth = document.getElementById('stat-azimuth');
+    const orbitalCvs = document.getElementById('orbital-canvas');
+    const orbitalCtx = orbitalCvs.getContext('2d');
+    const synodicCvs = document.getElementById('synodic-canvas');
+    const synodicCtx = synodicCvs.getContext('2d');
 
     /* --- Palette --- */
     const C = {
@@ -41,40 +50,17 @@
        ASTRONOMICAL CONSTANTS
        ========================================================== */
 
-    // Reference New Moon (UTC): 2025-01-29T12:36:00Z
     const REF_NEW_MOON = new Date('2025-01-29T12:36:00Z').getTime();
-
-    // Synodic month (Earth phase cycle as seen from Moon) ≈ 29.53059 days
     const SYNODIC_DAYS = 29.53059;
-
-    // Earth's sidereal rotation period ≈ 23h 56m 4s = 0.99727 days
     const SIDEREAL_DAY = 0.99726968;
-
-    // Obliquity of Earth's axis ≈ 23.44° (affects terminator tilt)
     const OBLIQUITY = 23.44;
-
-    // Moon's orbital eccentricity
     const MOON_ECC = 0.0549;
-
-    // Moon's orbital inclination to the ecliptic (degrees)
     const MOON_INC = 5.145;
-
-    // Anomalistic month (perigee to perigee) ≈ 27.55455 days
     const ANOMALISTIC_MONTH = 27.55455;
-
-    // Draconic month (node to node) ≈ 27.21222 days
     const DRACONIC_MONTH = 27.21222;
-
-    // Sidereal month ≈ 27.32166 days
     const SIDEREAL_MONTH = 27.32166;
-
-    // Mean Earth–Moon distance (km)
     const MEAN_DISTANCE = 384400;
-
-    // J2000.0 epoch
     const J2000 = new Date('2000-01-01T12:00:00Z').getTime();
-
-    // Degrees ↔ radians helpers
     const DEG = Math.PI / 180;
     const RAD = 180 / Math.PI;
 
@@ -82,13 +68,10 @@
        EARTH IMAGE — equirectangular map for full-globe scroll
        ========================================================== */
     const earthImg = new Image();
-    earthImg.src = 'earth-map.png';
+    earthImg.src = 'earth-realistic.jpg';
     let earthImgLoaded = false;
-
-    /* The equirectangular map is used directly for horizontal
-       scrolling — no circular clip preprocessing needed since
-       the circular clip happens at draw time in drawEarth(). */
     let earthCanvas = null;
+    let surfaceCanvas = null;
 
     earthImg.onload = () => {
         const w = earthImg.naturalWidth;
@@ -144,40 +127,87 @@
     }
 
     /* ==========================================================
-       LOCATION PRESETS  (astronomically derived)
+       OBSERVER SYSTEM  (selenographic lat/lon → sky position)
        ==========================================================
-       Selenographic coords → angular distance from sub-Earth
-       point → elevation / azimuth → canvas X/Y.
+       The sub-Earth point on the Moon is approximately (0°N, 0°E)
+       plus libration offsets.
 
-       Sub-Earth point ≈ 0°N, 0°E.
-       Elevation = 90° − angular_distance.
-       Azimuth maps to horizontal position.
+       Angular distance from observer to sub-Earth point determines
+       Earth's elevation in the sky:
+         elevation = 90° − angular_distance
 
-       Canvas convention (observer looking at the sky):
-         LEFT  = WEST      RIGHT = EAST
-         TOP   = high elev  BOTTOM = near horizon
+       Azimuth is the compass bearing from observer to sub-Earth.
 
-       Observer at Procellarum (57°W): sub-Earth is 57° to
-       the EAST → Earth appears east → RIGHT side of canvas.
-       Observer at Tranquility (31°E): sub-Earth is 31° to
-       the WEST → Earth appears west → LEFT side of canvas.
+       Canvas mapping:
+         X: azimuth → LEFT = WEST, RIGHT = EAST
+         Y: elevation → TOP = high, BOTTOM = near horizon (78%)
 
-       Location               Coords        Dist  Elev  Az     X%   Y%   Scale
-       Sea of Tranquility     8°N, 31°E     ~32°  58°   West   30   25   1.0
-       Oceanus Procellarum    18°N, 57°W    ~60°  30°   East   75   55   0.92
-       Lunar South Pole       90°S, 0°      ~84°   6°   North  50   68   0.82
-       Far Side (Moscoviense) 27°N, 148°E   ~150° <0°   —      —    —    0
+       If angular distance > 90°, Earth is below the horizon.
        ========================================================== */
-    const LOCATIONS = {
-        tranquility: { xRatio: 0.30, yRatio: 0.25, scale: 1.0 },
-        procellarum: { xRatio: 0.75, yRatio: 0.55, scale: 0.92 },
-        southpole: { xRatio: 0.50, yRatio: 0.68, scale: 0.82 },
-        farside: { xRatio: 0.50, yRatio: -1, scale: 0 },
+
+    const LOCATION_PRESETS = {
+        tranquility: { lat: 8, lon: 31, label: 'Sea of Tranquility' },
+        procellarum: { lat: 18, lon: -57, label: 'Oceanus Procellarum' },
+        southpole: { lat: -90, lon: 0, label: 'Lunar South Pole' },
+        farside: { lat: 27, lon: 148, label: 'Far Side — Moscoviense' },
     };
+
+    let obsLat = 8;   // degrees N
+    let obsLon = 31;   // degrees E
+
+    /**
+     * Compute Earth's sky position from observer selenographic coords.
+     * Returns { xRatio, yRatio, scale, elevation, azimuthDeg, visible }.
+     */
+    function earthSkyPosition(lat, lon, libration) {
+        // Sub-Earth point shifted by libration
+        const subLat = (libration ? libration.degLat : 0);
+        const subLon = (libration ? libration.degLon : 0);
+
+        // Observer coordinates in radians
+        const latR = lat * DEG;
+        const lonR = lon * DEG;
+        const sLatR = subLat * DEG;
+        const sLonR = subLon * DEG;
+
+        // Angular distance using spherical law of cosines
+        const cosD = Math.sin(latR) * Math.sin(sLatR)
+            + Math.cos(latR) * Math.cos(sLatR) * Math.cos(lonR - sLonR);
+        const angDist = Math.acos(Math.max(-1, Math.min(1, cosD))) * RAD;
+
+        // Elevation
+        const elevation = 90 - angDist;
+        const visible = elevation > 0;
+
+        // Azimuth (bearing from observer to sub-Earth point)
+        const dLon = sLonR - lonR;
+        const azRad = Math.atan2(
+            Math.sin(dLon) * Math.cos(sLatR),
+            Math.cos(latR) * Math.sin(sLatR) - Math.sin(latR) * Math.cos(sLatR) * Math.cos(dLon)
+        );
+        const azimuthDeg = ((azRad * RAD) + 360) % 360;
+
+        if (!visible) {
+            return { xRatio: 0.5, yRatio: -1, scale: 0, elevation, azimuthDeg, visible };
+        }
+
+        // Map elevation to Y: 90° → 0.12 (high), 0° → 0.76 (horizon)
+        const yRatio = 0.76 - (elevation / 90) * 0.64;
+
+        // Map azimuth to X: 0° (north) → 0.5, 90° (east) → 0.8, 270° (west) → 0.2
+        // East is RIGHT, West is LEFT
+        const azNorm = ((azimuthDeg + 180) % 360) - 180; // -180 to 180
+        const xRatio = 0.5 + (azNorm / 180) * 0.38;
+
+        // Scale diminishes near horizon
+        const scale = Math.max(0.5, Math.min(1.0, elevation / 45));
+
+        return { xRatio, yRatio, scale, elevation, azimuthDeg, visible };
+    }
 
     let current = { xRatio: 0.30, yRatio: 0.25, scale: 1.0 };
     let target = { ...current };
-    const LERP = 0.045;
+    const LERP = 0.06;
     function lerp(a, b, t) { return a + (b - a) * t; }
 
     /* ==========================================================
@@ -199,195 +229,115 @@
        DATE ↔ PHASE ASTRONOMY
        ========================================================== */
 
-    /**
-     * Julian centuries since J2000.0 for a given JS Date.
-     * Used by most astronomy functions below.
-     */
     function julianCenturies(date) {
         return (date.getTime() - J2000) / (86400000 * 36525);
     }
 
-    /**
-     * Sun's mean anomaly and ecliptic longitude (degrees).
-     * Low-precision formulae accurate to ~1° over ±50 years.
-     */
     function sunPosition(T) {
-        // Mean anomaly (degrees)
         const M = (357.5291 + 35999.0503 * T) % 360;
         const Mrad = M * DEG;
-        // Equation of centre (degrees)
         const C = 1.9146 * Math.sin(Mrad)
             + 0.0200 * Math.sin(2 * Mrad)
             + 0.0003 * Math.sin(3 * Mrad);
-        // Mean longitude
         const L0 = (280.4665 + 36000.7698 * T) % 360;
-        // Ecliptic longitude
         const sunLon = ((L0 + C) % 360 + 360) % 360;
         return { M, sunLon };
     }
 
-    /**
-     * Moon's mean elements (degrees).
-     */
     function moonElements(T) {
-        // Mean longitude
         const Lm = (218.3165 + 481267.8813 * T) % 360;
-        // Mean anomaly
         const Mm = (134.9634 + 477198.8676 * T) % 360;
-        // Mean elongation
         const D = (297.8502 + 445267.1115 * T) % 360;
-        // Argument of latitude (distance from ascending node)
         const F = (93.2720 + 483202.0175 * T) % 360;
-        // Longitude of ascending node
         const Om = (125.0446 - 1934.1363 * T) % 360;
         return { Lm, Mm, D, F, Om };
     }
 
-    /** Phase angle (0–360°) for a given JS Date.
-     *  0° = New Earth (fully shadowed), 180° = Full Earth. */
+    /** Phase angle 0–360°. 0° = New Earth, 180° = Full Earth.
+     *  REF is New Moon (Earth) = Full Earth (Moon), hence +180. */
     function phaseForDate(date) {
         const ms = date.getTime() - REF_NEW_MOON;
         const days = ms / 86400000;
-        return ((days / SYNODIC_DAYS) * 360 % 360 + 360) % 360;
+        return (((days / SYNODIC_DAYS) * 360 + 180) % 360 + 360) % 360;
     }
 
-    /** Earth rotation angle (degrees) for a given JS Date.
-     *  This drives the image scroll so continents drift. */
     function rotationForDate(date) {
         const ms = date.getTime() - REF_NEW_MOON;
         const days = ms / 86400000;
         return ((days / SIDEREAL_DAY) * 360) % 360;
     }
 
-    /**
-     * Terminator tilt angle (degrees) as seen from the Moon.
-     *
-     * Uses direct Sun–Earth–Moon geometry:
-     *  1. Compute the Sun's ecliptic longitude (with equation of centre).
-     *  2. Compute the Moon's ecliptic longitude.
-     *  3. The tilt is the projection of Earth's obliquity onto the
-     *     Moon-observer's plane, modulated by the Sun–Moon angle.
-     */
     function terminatorTiltForDate(date) {
         const T = julianCenturies(date);
         const { sunLon } = sunPosition(T);
         const { Lm, Mm, D, F } = moonElements(T);
 
-        // Moon's ecliptic longitude (truncated series, ~0.5° accuracy)
         const moonLon = Lm
             + 6.289 * Math.sin(Mm * DEG)
             + 1.274 * Math.sin((2 * D - Mm) * DEG)
             + 0.658 * Math.sin(2 * D * DEG)
             - 0.214 * Math.sin(2 * Mm * DEG)
-            - 0.186 * Math.sin((Lm - 2 * D) * DEG * 0)  // mean anomaly of Sun term
+            - 0.186 * Math.sin(Mm * DEG)
             + 0.114 * Math.sin(2 * F * DEG);
 
-        // Sun–Moon elongation projected onto ecliptic
         const elong = (sunLon - moonLon) * DEG;
-
-        // Solar declination (seasonal tilt of Earth's axis toward/away Sun)
         const sunDec = Math.asin(Math.sin(OBLIQUITY * DEG) * Math.sin(sunLon * DEG));
-
-        // The terminator tilt as seen from the Moon combines:
-        //  - Earth's axial tilt projected toward the observer
-        //  - The elongation angle (most visible at quarter phases)
         const tilt = sunDec * RAD * Math.sin(elong) * 0.7;
-
-        return tilt;   // degrees
+        return tilt;
     }
 
-    /**
-     * Earth's apparent angular tilt (degrees) as seen from the Moon.
-     * Earth's north pole direction rotates seasonally because the
-     * Earth–Moon system orbits the Sun while Earth's axis stays fixed
-     * in inertial space (pointing toward Polaris).
-     */
     function earthTiltForDate(date) {
         const T = julianCenturies(date);
         const { sunLon } = sunPosition(T);
-
-        // The apparent tilt of Earth's axis as seen from the Moon
-        // is the projection of the obliquity onto the Moon's sky plane.
-        // It varies from +23.44° (June solstice, north pole tilted toward
-        // Sun/Moon) to −23.44° (December solstice).
-        //
-        // The visual rotation of the Earth's image is approximately:
-        //   -OBLIQUITY × sin(sunLon)  (negative because screen Y is down)
-        // This gives the angle between Earth's north pole and "up" on screen.
         const tiltAngle = -OBLIQUITY * Math.sin(sunLon * DEG) * 0.6;
-        return tiltAngle;   // degrees
+        return tiltAngle;
     }
 
-    /**
-     * Earth apparent size scale factor (1.0 = mean distance).
-     * Varies ±~6% between perigee (356,500 km) and apogee (406,700 km).
-     */
     function earthScaleForDate(date) {
         const ms = date.getTime() - REF_NEW_MOON;
         const days = ms / 86400000;
-
-        // Moon's mean anomaly (radians)
         const M = (days / ANOMALISTIC_MONTH) * 2 * Math.PI;
-
-        // Distance using equation of centre (first two terms)
-        // r ≈ a(1 - e·cos(M)) for small e
         const distance = MEAN_DISTANCE * (1 - MOON_ECC * Math.cos(M)
             - MOON_ECC * MOON_ECC * 0.5 * Math.cos(2 * M));
-
-        // Scale is inverse of distance ratio
-        return MEAN_DISTANCE / distance;
+        return { scale: MEAN_DISTANCE / distance, distance };
     }
 
     /* ==========================================================
-       LIBRATION (ASTRONOMY)
+       LIBRATION
        ========================================================== */
-    /**
-     * Optical libration of the Moon.
-     *
-     * Optical libration in longitude arises because the Moon's
-     * rotation is uniform but its orbital speed varies (Kepler's
-     * 2nd law, driven by eccentricity e ≈ 0.0549). The observer
-     * sees ±7.9° around the mean sub-Earth point.
-     *
-     * Optical libration in latitude arises because the Moon's
-     * equator is tilted ~6.7° to its orbital plane (which is
-     * itself tilted 5.145° to the ecliptic). The observer sees
-     * ±6.7° north-south wobble.
-     *
-     * This model uses the Moon's mean anomaly for longitude
-     * libration and argument of latitude for latitude libration,
-     * giving date-accurate phase offsets.
-     */
     function librationForDate(date) {
         const ms = date.getTime() - REF_NEW_MOON;
         const days = ms / 86400000;
         const T = julianCenturies(date);
         const { Mm, F } = moonElements(T);
 
-        // --- Longitude libration (east-west) ---
-        // Driven by the equation of centre: the difference between
-        // the Moon's true anomaly and its mean anomaly.
-        // Leading term: 2e·sin(M) ≈ 2×0.0549×sin(M) in radians
-        // Converting to degrees: max ≈ 6.29° (the dominant correction)
-        // We use the full amplitude of ±7.9° with proper phase.
         const MmRad = Mm * DEG;
         const degLon = -(6.289 * Math.sin(MmRad)
             + 1.274 * Math.sin(2 * MmRad)
             + 0.186 * Math.sin(3 * MmRad));
 
-        // --- Latitude libration (north-south) ---
-        // Driven by the Moon's argument of latitude (F = distance
-        // from ascending node along the orbit). The Moon's equator
-        // is tilted ~6.7° to its orbital plane.
         const FRad = F * DEG;
         const degLat = -(MOON_INC + 1.54) * Math.sin(FRad)
             - 0.28 * Math.sin(2 * FRad);
 
-        // Visual offsets (fraction of Earth radius on canvas)
-        const lonOffset = degLon / 60;  // ~0.13 at maximum
-        const latOffset = degLat / 80;  // ~0.08 at maximum
+        const lonOffset = degLon / 60;
+        const latOffset = degLat / 80;
 
         return { xOff: lonOffset, yOff: latOffset, degLon, degLat };
+    }
+
+    /**
+     * Moon's ecliptic longitude for orbital view position.
+     */
+    function moonEclipticLon(date) {
+        const T = julianCenturies(date);
+        const { Lm, Mm, D, F } = moonElements(T);
+        return (Lm
+            + 6.289 * Math.sin(Mm * DEG)
+            + 1.274 * Math.sin((2 * D - Mm) * DEG)
+            + 0.658 * Math.sin(2 * D * DEG)
+            - 0.214 * Math.sin(2 * Mm * DEG)
+            + 0.114 * Math.sin(2 * F * DEG)) % 360;
     }
 
     /* ==========================================================
@@ -399,6 +349,7 @@
         canvas.width = rect.width * dpr;
         canvas.height = rect.height * dpr;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        surfaceCanvas = null; // force redraw
     }
     window.addEventListener('resize', resize);
     resize();
@@ -407,7 +358,6 @@
        DRAW EARTH  (image-based)
        ========================================================== */
 
-    /** Wobbly circle outline */
     function wobbleCircle(cx, cy, r, segs, w) {
         ctx.beginPath();
         for (let i = 0; i <= segs; i++) {
@@ -423,25 +373,17 @@
     function drawEarth(cx, cy, r, phaseDeg, rotDeg, tiltDeg, axisTiltDeg) {
         if (!earthImgLoaded) return;
 
-        /* --- Single circular clip for image + shadow + highlight --- */
         ctx.save();
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.clip();
 
-        /* -- Apply Earth axial tilt (seasonal rotation) -- */
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(axisTiltDeg * DEG);
         ctx.translate(-cx, -cy);
 
-        /* -- Polar-axis rotation via horizontal scroll --
-           Features drift RIGHT → LEFT (as seen from the Moon).
-           The equirectangular map tiles seamlessly. The map width
-           maps to the equator circumference; height maps to pole-
-           to-pole. We draw it at 2× radius wide (equirectangular
-           aspect) and 1× radius tall. */
-        const mapW = r * 4;   // equirectangular: width = 2× height
+        const mapW = r * 4;
         const mapH = r * 2;
         const scrollFrac = ((rotDeg % 360) + 360) % 360 / 360;
         const scrollX = scrollFrac * mapW;
@@ -452,57 +394,54 @@
                 mapW, mapH);
         }
 
-        ctx.restore();   // releases axial tilt rotation
+        ctx.restore();
 
-        /* -- Specular highlight (inside same clip) -- */
+        // Soft atmospheric glow and slight darkening at the terminator edge
         const hg = ctx.createRadialGradient(
-            cx - r * 0.28, cy - r * 0.28, r * 0.02,
-            cx - r * 0.1, cy - r * 0.1, r * 0.55
+            cx - r * 0.3, cy - r * 0.3, r * 0.1,
+            cx - r * 0.1, cy - r * 0.1, r * 0.8
         );
-        hg.addColorStop(0, 'rgba(255,255,255,0.25)');
-        hg.addColorStop(1, 'rgba(255,255,255,0)');
+        hg.addColorStop(0, 'rgba(255,255,255,0.15)');
+        hg.addColorStop(0.7, 'rgba(255,255,255,0)');
+        hg.addColorStop(1, 'rgba(0,0,0,0.4)');
         ctx.fillStyle = hg;
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.fill();
 
-        /* -- Phase shadow with tilt (inside same clip) -- */
         drawPhaseShadowInClip(cx, cy, r, phaseDeg, tiltDeg);
 
-        ctx.restore();   // releases the clip
+        ctx.restore();
 
-        /* --- Wobbly outline (outside clip) --- */
-        wobbleCircle(cx, cy, r, 90, r * 0.012);
-        ctx.strokeStyle = C.outline;
-        ctx.lineWidth = 3.5;
+        // Earth base outline (subtle)
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
         ctx.stroke();
     }
 
-    /**
-     * Phase terminator shadow — called INSIDE the globe clip.
-     * phaseDeg 0 = New Earth (full shadow), 180 = Full (no shadow).
-     * tiltDeg = rotation of the terminator line.
-     */
     function drawPhaseShadowInClip(cx, cy, r, phaseDeg, tiltDeg) {
         const d = ((phaseDeg % 360) + 360) % 360;
         const phaseAngle = Math.PI - (d / 180) * Math.PI;
         const terminatorW = Math.abs(Math.cos(phaseAngle)) * r;
 
         ctx.save();
-        // Apply tilt rotation around Earth centre
         ctx.translate(cx, cy);
         ctx.rotate((tiltDeg * Math.PI) / 180);
         ctx.translate(-cx, -cy);
 
         ctx.beginPath();
         if (d <= 180) {
-            ctx.arc(cx, cy, r + 2, -Math.PI / 2, Math.PI / 2, false);
-            ctx.ellipse(cx, cy, terminatorW, r + 2, 0,
-                Math.PI / 2, -Math.PI / 2, d > 90);
-        } else {
+            // Waxing: shadow on LEFT side
             ctx.arc(cx, cy, r + 2, Math.PI / 2, -Math.PI / 2, false);
             ctx.ellipse(cx, cy, terminatorW, r + 2, 0,
-                -Math.PI / 2, Math.PI / 2, d < 270);
+                -Math.PI / 2, Math.PI / 2, d > 90);
+        } else {
+            // Waning: shadow on RIGHT side
+            ctx.arc(cx, cy, r + 2, -Math.PI / 2, Math.PI / 2, false);
+            ctx.ellipse(cx, cy, terminatorW, r + 2, 0,
+                Math.PI / 2, -Math.PI / 2, d < 270);
         }
         ctx.closePath();
         ctx.fillStyle = C.shadow;
@@ -547,7 +486,6 @@
         }
     })();
 
-    let surfaceCanvas = null;
     function drawLunarSurface(w, h) {
         if (!surfaceCanvas || surfaceCanvas.width !== w || surfaceCanvas.height !== h) {
             surfaceCanvas = document.createElement('canvas');
@@ -563,33 +501,37 @@
             for (let i = 0; i <= HSEG; i++) sCtx.lineTo((i / HSEG) * w, hy + hBumps[i]);
             sCtx.lineTo(w, h); sCtx.lineTo(0, h); sCtx.closePath();
             const gg = sCtx.createLinearGradient(0, hy, 0, h);
-            gg.addColorStop(0, C.groundWarm); gg.addColorStop(0.4, C.groundDeep);
-            gg.addColorStop(1, '#A0643A');
+            gg.addColorStop(0, '#2C2F33');
+            gg.addColorStop(0.4, '#181A1C');
+            gg.addColorStop(1, '#0A0B0C');
             sCtx.fillStyle = gg; sCtx.fill();
             sCtx.restore();
 
+            // Subtle crater/noise texture instead of scribbles
             sCtx.save();
             sCtx.beginPath(); sCtx.rect(0, hy - 4, w, h - hy + 4); sCtx.clip();
-            sCtx.strokeStyle = 'rgba(160,90,40,0.30)'; sCtx.lineWidth = 1.2;
+            sCtx.strokeStyle = 'rgba(10, 12, 14, 0.4)'; sCtx.lineWidth = 1.5;
             for (const s of scribH) {
+                // Draw small crater arcs
+                const px = s.segs[0].xr * w;
+                const py = hy + s.yOff + 2;
+                const cr = 4 + Math.random() * 12;
                 sCtx.beginPath();
-                for (let j = 0; j < s.segs.length; j++) {
-                    const px = s.segs[j].xr * w, py = hy + s.yOff + s.segs[j].yr;
-                    if (j === 0) sCtx.moveTo(px, py); else sCtx.lineTo(px, py);
-                }
+                sCtx.ellipse(px, py, cr, cr * 0.3, 0, 0, Math.PI);
                 sCtx.stroke();
             }
-            sCtx.strokeStyle = 'rgba(195,120,60,0.18)'; sCtx.lineWidth = 1;
+            sCtx.strokeStyle = 'rgba(255, 255, 255, 0.03)'; sCtx.lineWidth = 1;
             const gH = h - hy;
             for (const d of scribD) {
-                const x = d.xr * w, y = hy + 8 + d.yr * (gH - 12);
-                sCtx.beginPath(); sCtx.moveTo(x, y); sCtx.lineTo(x + d.dx, y + d.dy); sCtx.stroke();
+                // Draw light highlights on crater rims
+                const x = d.xr * w, y = hy + 4 + d.yr * (gH - 8);
+                sCtx.beginPath(); sCtx.moveTo(x, y); sCtx.lineTo(x + d.dx * 0.5, y + d.dy * 0.2); sCtx.stroke();
             }
             sCtx.restore();
 
             sCtx.save(); sCtx.beginPath(); sCtx.moveTo(0, hy);
             for (let i = 0; i <= HSEG; i++) sCtx.lineTo((i / HSEG) * w, hy + hBumps[i]);
-            sCtx.strokeStyle = C.outline; sCtx.lineWidth = 2.5; sCtx.stroke();
+            sCtx.strokeStyle = '#111'; sCtx.lineWidth = 2.5; sCtx.stroke();
             sCtx.restore();
         }
         ctx.drawImage(surfaceCanvas, 0, 0);
@@ -603,45 +545,233 @@
         ctx.font = '28px Patrick Hand'; ctx.fillStyle = C.starWhite;
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.globalAlpha = 0.65 + 0.15 * Math.sin(time * 1.2);
-        ctx.fillText('🌑  Earth is below the horizon here…', w / 2, h * 0.38);
+        ctx.fillText('🌑  Earth is below the horizon…', w / 2, h * 0.38);
         ctx.font = '18px Patrick Hand'; ctx.globalAlpha = 0.45;
-        ctx.fillText("You're on the Moon's far side!", w / 2, h * 0.44);
+        ctx.fillText(`Observer: ${obsLat}°N, ${obsLon}°E`, w / 2, h * 0.44);
         ctx.restore();
     }
 
     /* ==========================================================
-       ON-CANVAS DATE COUNTER
+       ORBITAL BIRD'S-EYE VIEW (mini-map)
+       ==========================================================
+       Top-down view of the Sun–Earth–Moon system.
+       Earth at centre, Moon orbiting, Sun direction indicated.
+       Both Earth and Moon show day/night shading.
        ========================================================== */
-    function drawDateLabel(w, h, date, phase) {
-        if (!date) return;
-        const dateStr = date.toLocaleDateString('en-US', {
-            year: 'numeric', month: 'short', day: 'numeric',
-        });
-        const phaseStr = phaseName(phase);
+    function drawOrbitalView(date, phaseDeg) {
+        const w = orbitalCvs.width;
+        const h = orbitalCvs.height;
+        const cx = w / 2, cy = h / 2;
+        const orbitR = 70;  // Moon orbit radius on canvas
 
-        ctx.save();
-        ctx.font = '20px Patrick Hand';
-        ctx.fillStyle = 'rgba(255,253,231,0.75)';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(dateStr, 20, h * 0.78 - 58);
-        ctx.font = '15px Patrick Hand';
-        ctx.fillStyle = 'rgba(255,253,231,0.50)';
-        ctx.fillText(phaseStr, 20, h * 0.78 - 40);
-        ctx.restore();
+        orbitalCtx.clearRect(0, 0, w, h);
+
+        // Background
+        orbitalCtx.fillStyle = 'rgba(6,8,12,0.95)';
+        orbitalCtx.beginPath();
+        orbitalCtx.arc(cx, cy, 98, 0, Math.PI * 2);
+        orbitalCtx.fill();
+
+        // Get Sun direction (ecliptic longitude)
+        const T = julianCenturies(date);
+        const { sunLon } = sunPosition(T);
+        const moonLon = moonEclipticLon(date);
+
+        // Sun direction angle (Sun is far away, direction from Earth)
+        // sunLon gives the ecliptic longitude of the Sun.
+        // In our top-down view: 0° = right, 90° = up (north ecliptic pole up)
+        // But we want 0° at the top for intuitive display.
+        const sunAngle = -(sunLon + 90) * DEG;  // rotate so vernal equinox is right
+
+        // Moon position on orbit
+        const moonAngle = -(moonLon + 90) * DEG;
+        const moonX = cx + Math.cos(moonAngle) * orbitR;
+        const moonY = cy + Math.sin(moonAngle) * orbitR;
+
+        // Draw orbit circle
+        orbitalCtx.beginPath();
+        orbitalCtx.arc(cx, cy, orbitR, 0, Math.PI * 2);
+        orbitalCtx.strokeStyle = 'rgba(255,255,255,0.12)';
+        orbitalCtx.setLineDash([4, 4]);
+        orbitalCtx.lineWidth = 1;
+        orbitalCtx.stroke();
+        orbitalCtx.setLineDash([]);
+
+        // Sunlight belt (parallel rays)
+        const sunDx = Math.cos(sunAngle);
+        const sunDy = Math.sin(sunAngle);
+        orbitalCtx.save();
+        orbitalCtx.strokeStyle = 'rgba(255,220,80,0.45)';
+        orbitalCtx.lineWidth = 1.5;
+
+        // Draw 5 parallel lines
+        for (let i = -2; i <= 2; i++) {
+            const offset = i * 14;
+            const perpX = -sunDy * offset;
+            const perpY = sunDx * offset;
+            const x1 = cx + sunDx * 98 + perpX;
+            const y1 = cy + sunDy * 98 + perpY;
+            const x2 = cx + sunDx * 55 + perpX;
+            const y2 = cy + sunDy * 55 + perpY;
+            orbitalCtx.beginPath();
+            orbitalCtx.moveTo(x1, y1); orbitalCtx.lineTo(x2, y2);
+            orbitalCtx.stroke();
+
+            // Draw arrowhead on the center line
+            if (i === 0) {
+                orbitalCtx.beginPath();
+                orbitalCtx.moveTo(x2, y2);
+                orbitalCtx.lineTo(x2 + sunDx * 6 - sunDy * 4, y2 + sunDy * 6 + sunDx * 4);
+                orbitalCtx.lineTo(x2 + sunDx * 6 + sunDy * 4, y2 + sunDy * 6 - sunDx * 4);
+                orbitalCtx.fillStyle = 'rgba(255,220,80,0.7)';
+                orbitalCtx.fill();
+            }
+        }
+        orbitalCtx.restore();
+
+        // "Sun" label at the base of the center ray
+        const sunLabelX = cx + sunDx * 85;
+        const sunLabelY = cy + sunDy * 85;
+        orbitalCtx.font = '10px Patrick Hand';
+        orbitalCtx.fillStyle = 'rgba(255,220,80,0.9)';
+        orbitalCtx.textAlign = 'center';
+        orbitalCtx.fillText('Sun', sunLabelX, sunLabelY - 12);
+
+        // Earth (center) with day/night shading
+        const earthR = 12;
+        orbitalCtx.save();
+        orbitalCtx.beginPath();
+        orbitalCtx.arc(cx, cy, earthR, 0, Math.PI * 2);
+        orbitalCtx.clip();
+        // Lit side
+        orbitalCtx.fillStyle = '#3A7BD5';
+        orbitalCtx.fillRect(cx - earthR, cy - earthR, earthR * 2, earthR * 2);
+        // Night side: half-circle opposite to Sun
+        orbitalCtx.beginPath();
+        const nightStartA = sunAngle + Math.PI / 2;
+        const nightEndA = sunAngle - Math.PI / 2;
+        orbitalCtx.arc(cx, cy, earthR + 1, nightStartA, nightEndA, false);
+        orbitalCtx.closePath();
+        orbitalCtx.fillStyle = 'rgba(5,8,15,0.75)';
+        orbitalCtx.fill();
+        orbitalCtx.restore();
+        // Earth outline
+        orbitalCtx.beginPath();
+        orbitalCtx.arc(cx, cy, earthR, 0, Math.PI * 2);
+        orbitalCtx.strokeStyle = 'rgba(93,173,226,0.5)';
+        orbitalCtx.lineWidth = 1;
+        orbitalCtx.stroke();
+
+        // Moon with day/night shading
+        const moonR = 5;
+        orbitalCtx.save();
+        orbitalCtx.beginPath();
+        orbitalCtx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+        orbitalCtx.clip();
+        // Base color
+        orbitalCtx.fillStyle = '#B0ADA8';
+        orbitalCtx.fillRect(moonX - moonR, moonY - moonR, moonR * 2, moonR * 2);
+        // Night side
+        orbitalCtx.beginPath();
+        orbitalCtx.arc(moonX, moonY, moonR + 1, nightStartA, nightEndA, false);
+        orbitalCtx.closePath();
+        orbitalCtx.fillStyle = 'rgba(5,8,15,0.8)';
+        orbitalCtx.fill();
+        orbitalCtx.restore();
+        // Moon outline
+        orbitalCtx.beginPath();
+        orbitalCtx.arc(moonX, moonY, moonR, 0, Math.PI * 2);
+        orbitalCtx.strokeStyle = 'rgba(180,175,165,0.5)';
+        orbitalCtx.lineWidth = 1;
+        orbitalCtx.stroke();
+
+        // Labels
+        orbitalCtx.font = '10px Patrick Hand';
+        orbitalCtx.fillStyle = 'rgba(255,253,231,0.6)';
+        orbitalCtx.textAlign = 'center';
+        orbitalCtx.fillText('Earth', cx, cy + earthR + 12);
+        orbitalCtx.fillText('Moon', moonX, moonY - moonR - 4);
+
+        // Observer indicator on Moon (tiny dot)
+        orbitalCtx.beginPath();
+        orbitalCtx.arc(moonX + 2, moonY - 2, 1.5, 0, Math.PI * 2);
+        orbitalCtx.fillStyle = '#5DADE2';
+        orbitalCtx.fill();
+    }
+
+    /* ==========================================================
+       SYNODIC CYCLE TIMELINE
+       ========================================================== */
+    function drawSynodicTimeline(phaseDeg) {
+        const w = synodicCvs.width;
+        const h = synodicCvs.height;
+        synodicCtx.clearRect(0, 0, w, h);
+
+        const barY = 18;
+        const barH = 14;
+        const margin = 14;
+        const barW = w - margin * 2;
+
+        // Background bar with phase gradient
+        const grad = synodicCtx.createLinearGradient(margin, 0, margin + barW, 0);
+        grad.addColorStop(0, '#0B0E14');      // New Earth (0°)
+        grad.addColorStop(0.25, '#1a3a5c');   // First Quarter
+        grad.addColorStop(0.5, '#5DADE2');    // Full Earth (180°)
+        grad.addColorStop(0.75, '#1a3a5c');   // Third Quarter
+        grad.addColorStop(1, '#0B0E14');      // New Earth (360°)
+
+        synodicCtx.fillStyle = grad;
+        synodicCtx.beginPath();
+        synodicCtx.roundRect(margin, barY, barW, barH, 3);
+        synodicCtx.fill();
+
+        // Border
+        synodicCtx.strokeStyle = 'rgba(93,173,226,0.3)';
+        synodicCtx.lineWidth = 1;
+        synodicCtx.beginPath();
+        synodicCtx.roundRect(margin, barY, barW, barH, 3);
+        synodicCtx.stroke();
+
+        // Phase labels
+        synodicCtx.font = '9px Patrick Hand';
+        synodicCtx.fillStyle = 'rgba(255,253,231,0.45)';
+        synodicCtx.textAlign = 'center';
+        synodicCtx.fillText('🌑', margin, barY - 3);
+        synodicCtx.fillText('🌓', margin + barW * 0.25, barY - 3);
+        synodicCtx.fillText('🌕', margin + barW * 0.5, barY - 3);
+        synodicCtx.fillText('🌗', margin + barW * 0.75, barY - 3);
+        synodicCtx.fillText('🌑', margin + barW, barY - 3);
+
+        // Current position marker
+        const frac = ((phaseDeg % 360) + 360) % 360 / 360;
+        const markerX = margin + frac * barW;
+
+        synodicCtx.beginPath();
+        synodicCtx.moveTo(markerX, barY + barH + 2);
+        synodicCtx.lineTo(markerX - 4, barY + barH + 9);
+        synodicCtx.lineTo(markerX + 4, barY + barH + 9);
+        synodicCtx.closePath();
+        synodicCtx.fillStyle = '#FFFDE7';
+        synodicCtx.fill();
+
+        // Day count
+        const dayInCycle = (frac * SYNODIC_DAYS).toFixed(1);
+        synodicCtx.font = '10px Space Mono';
+        synodicCtx.fillStyle = 'rgba(255,253,231,0.6)';
+        synodicCtx.textAlign = 'center';
+        synodicCtx.fillText(`Day ${dayInCycle} / ${SYNODIC_DAYS.toFixed(1)}`, w / 2, barY + barH + 20);
     }
 
     /* ==========================================================
        TIME-LAPSE ENGINE
        ========================================================== */
     let isPlaying = false;
-    let currentDate = new Date();   // the "virtual" date for rendering
-    let lapseStart = null;         // Date object
+    let currentDate = new Date();
+    let lapseStart = null;
     let lapseEnd = null;
     let lapseTimer = null;
     let isScrubbing = false;
 
-    // Set default date inputs (today ± 14 days)
     const today = new Date();
     const d14ago = new Date(today); d14ago.setDate(d14ago.getDate() - 14);
     const d14fwd = new Date(today); d14fwd.setDate(d14fwd.getDate() + 14);
@@ -659,7 +789,6 @@
         lapseEnd = new Date(endIn.value + 'T23:59:59');
         if (isNaN(lapseStart) || isNaN(lapseEnd) || lapseEnd <= lapseStart) return;
 
-        // Only reset currentDate if we are not already within the lapse window
         if (!currentDate || currentDate < lapseStart || currentDate > lapseEnd) {
             currentDate = new Date(lapseStart);
         }
@@ -668,8 +797,8 @@
         playBtn.textContent = '⏸ Pause';
         playBtn.classList.add('playing');
 
-        const speed = parseInt(speedSel.value, 10);  // days per second
-        const tickMs = 50;                            // ~20 fps for the counter
+        const speed = parseInt(speedSel.value, 10);
+        const tickMs = 50;
         const daysPerTick = speed * (tickMs / 1000);
 
         clearInterval(lapseTimer);
@@ -686,7 +815,7 @@
     function stopLapse() {
         isPlaying = false;
         clearInterval(lapseTimer);
-        playBtn.textContent = '▶ Play Time-Lapse';
+        playBtn.textContent = '▶ Play';
         playBtn.classList.remove('playing');
     }
 
@@ -694,7 +823,6 @@
         if (isPlaying) stopLapse(); else startLapse();
     });
 
-    // Timeline Slider Logic
     function updateSliderFromDate() {
         if (isScrubbing || !lapseStart || !lapseEnd) return;
         const totalMs = lapseEnd.getTime() - lapseStart.getTime();
@@ -718,18 +846,43 @@
     timelineSlider.addEventListener('mouseup', () => { isScrubbing = false; });
     timelineSlider.addEventListener('touchend', () => { isScrubbing = false; });
 
-    // When dates change, reset slider
     startIn.addEventListener('change', () => { timelineSlider.value = 0; updateDateFromSlider(); });
     endIn.addEventListener('change', () => { timelineSlider.value = 0; updateDateFromSlider(); });
 
+    /* ==========================================================
+       OBSERVER CONTROLS
+       ========================================================== */
+    function updateObserverFromInputs() {
+        obsLat = Math.max(-90, Math.min(90, parseInt(obsLatIn.value, 10) || 0));
+        obsLon = Math.max(-180, Math.min(180, parseInt(obsLonIn.value, 10) || 0));
+    }
+
+    function setPreset(key) {
+        const p = LOCATION_PRESETS[key];
+        if (p) {
+            obsLatIn.value = p.lat;
+            obsLonIn.value = p.lon;
+            updateObserverFromInputs();
+        }
+    }
+
     locSel.addEventListener('change', () => {
-        const loc = LOCATIONS[locSel.value];
-        if (loc) {
-            target.xRatio = loc.xRatio;
-            target.yRatio = loc.yRatio;
-            target.scale = loc.scale;
+        if (locSel.value !== 'custom') {
+            setPreset(locSel.value);
         }
     });
+
+    obsLatIn.addEventListener('change', () => {
+        updateObserverFromInputs();
+        locSel.value = 'custom';
+    });
+    obsLonIn.addEventListener('change', () => {
+        updateObserverFromInputs();
+        locSel.value = 'custom';
+    });
+
+    // Initialize from default preset
+    setPreset('tranquility');
 
     /* ==========================================================
        MAIN LOOP
@@ -745,15 +898,8 @@
 
         drawStars(w, h, time);
 
-        // Lerp position
-        current.xRatio = lerp(current.xRatio, target.xRatio, LERP);
-        current.yRatio = lerp(current.yRatio, target.yRatio, LERP);
-        current.scale = lerp(current.scale, target.scale, LERP);
-
-        // Determine current date for astronomy
+        // Determine current date
         let renderDate = currentDate;
-
-        // If the date hasn't been set by playing or scrubbing yet, default to start date
         if (!isPlaying && !isScrubbing && (!renderDate || isNaN(renderDate.getTime()))) {
             const startVal = startIn.value;
             renderDate = startVal ? new Date(startVal + 'T12:00:00') : new Date();
@@ -765,16 +911,26 @@
         const rotDeg = rotationForDate(renderDate);
         const tiltDeg = terminatorTiltForDate(renderDate);
         const axisTiltDeg = earthTiltForDate(renderDate);
-        const distScale = earthScaleForDate(renderDate);
+        const { scale: distScale, distance: earthMoonDist } = earthScaleForDate(renderDate);
         const libration = librationForDate(renderDate);
 
-        // Earth position (apply libration offset + distance-based size)
+        // Observer → sky position
+        const sky = earthSkyPosition(obsLat, obsLon, libration);
+        target.xRatio = sky.xRatio;
+        target.yRatio = sky.visible ? sky.yRatio : -1;
+        target.scale = sky.visible ? sky.scale : 0;
+
+        // Lerp
+        current.xRatio = lerp(current.xRatio, target.xRatio, LERP);
+        current.yRatio = lerp(current.yRatio, target.yRatio, LERP);
+        current.scale = lerp(current.scale, target.scale, LERP);
+
+        // Earth position
         const earthR = Math.min(w, h) * 0.14 * current.scale * distScale;
         const earthX = w * current.xRatio + (libration.xOff * earthR);
         const earthY = h * current.yRatio + (libration.yOff * earthR);
 
-        if (target.yRatio >= 0 && current.scale > 0.05) {
-            // Subtle glow
+        if (sky.visible && current.scale > 0.05) {
             ctx.save();
             const glow = ctx.createRadialGradient(earthX, earthY, earthR * 0.9,
                 earthX, earthY, earthR * 1.8);
@@ -793,15 +949,28 @@
 
         drawLunarSurface(w, h);
 
-        // Update Stats UI
-        const isoStr = renderDate.toISOString().split('T')[0];
-        statDate.textContent = isoStr;
+        // --- Update stats panel ---
+        statDate.textContent = isoDate(renderDate);
         statPhase.textContent = phaseName(phaseDeg) + ` (${Math.round(phaseDeg)}°)`;
 
         const ill = (1 - Math.cos((phaseDeg / 180) * Math.PI)) / 2;
         statIllum.textContent = `${(ill * 100).toFixed(1)}%`;
 
-        statLibration.textContent = `X: ${libration.degLon > 0 ? '+' : ''}${libration.degLon.toFixed(1)}° Y: ${libration.degLat > 0 ? '+' : ''}${libration.degLat.toFixed(1)}°`;
+        statDist.textContent = `${Math.round(earthMoonDist).toLocaleString()} km`;
+
+        statLibration.textContent = `${libration.degLon > 0 ? '+' : ''}${libration.degLon.toFixed(1)}° / ${libration.degLat > 0 ? '+' : ''}${libration.degLat.toFixed(1)}°`;
+
+        statElev.textContent = sky.visible
+            ? `${sky.elevation.toFixed(1)}°`
+            : 'below horizon';
+
+        statAzimuth.textContent = sky.visible
+            ? `${sky.azimuthDeg.toFixed(1)}°`
+            : '—';
+
+        // --- Draw side-panel canvases ---
+        drawOrbitalView(renderDate, phaseDeg);
+        drawSynodicTimeline(phaseDeg);
 
         requestAnimationFrame(draw);
     }

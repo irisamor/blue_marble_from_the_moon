@@ -16,6 +16,37 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.5.1] — 2026-02-27
+
+### 📸 Realistic Aesthetics Upgrade
+
+### Changed (Patch)
+- **Earth texture**: Replaced the hand-painted `earth-map.png` with a high-resolution, photorealistic `earth-realistic.jpg` texture featuring deep oceans and seamless cloud cover.
+- **Earth rendering**: Removed the cartoonish wavy outline (`wobbleCircle`) and softened the atmospheric glow for a more realistic appearance in space.
+- **Lunar surface**: Changed the warm, hand-drawn orange/brown foreground to a realistic grayscale lunar ash gradient. Replaced scribble lines with subtle crater arcs and highlights.
+- **Orbital mini-map**: Replaced the yellow Sun icon with a directional "sunlight belt" (parallel rays with a central arrowhead) to match the dashboard aesthetic.
+
+---
+
+## [0.5.0] — 2026-02-27
+
+### 🛰️ Mission Control Dashboard
+
+### Added (Minor — breaking UI change)
+- **Mission Control side panel**: Replaced the bottom control bar with a sleek, dark side panel (~28% width). All controls and data now live in a vertically scrollable panel alongside the main canvas.
+- **Custom observer coordinates**: Users can input any selenographic latitude (-90° to +90°) and longitude (-180° to +180°) in whole-degree increments. Quick presets (Tranquility, Procellarum, South Pole, Far Side) populate the inputs.
+- **Selenographic positioning**: Earth's sky position is now computed from the observer's exact coordinates using spherical trigonometry (angular distance, azimuth from sub-Earth point ± libration).
+- **Orbital bird's-eye view**: A real-time 200×200px mini-map showing the Sun–Earth–Moon system from above. Both Earth and Moon display day/night shading. The Moon's orbital position uses the ecliptic longitude from the lunar ephemeris.
+- **Synodic cycle timeline**: A gradient bar showing the 29.53-day cycle with phase emoji markers and current position indicator with day count.
+- **Extended data readouts**: Distance (km), Earth elevation (°), Earth azimuth (°) added alongside existing phase, illumination, and libration readouts. Values use monospace font for a scientific dashboard feel.
+- **Space Mono font**: Added as a secondary font for numeric readouts (loaded via Google Fonts).
+
+### Changed (Minor)
+- **Layout**: Full-width canvas + bottom bar → two-column layout (canvas left, panel right). Canvas now fills the full viewport height.
+- **Responsive design**: On screens < 900px, the panel stacks below the canvas with a flex-wrapped horizontal layout.
+
+---
+
 ## [0.4.0] — 2026-02-26
 
 ### 🔭 Astronomical Accuracy Overhaul

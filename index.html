@@ -4,71 +4,110 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Earthview from the Moon</title>
+  <title>Earthview from the Moon — Mission Control</title>
   <meta name="description"
-    content="An interactive 2D visualizer showing what the Earth looks like from the surface of the Moon, with time-lapse animation.">
+    content="An interactive 2D visualizer showing what the Earth looks like from the surface of the Moon, with astronomical accuracy and mission control dashboard.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Space+Mono:wght@400;700&display=swap"
+    rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 
 <body>
-  <canvas id="scene"></canvas>
-
-  <div id="stats-panel">
-    <div class="stat-row"><span class="stat-label">Date:</span> <span id="stat-date">--</span></div>
-    <div class="stat-row"><span class="stat-label">Phase:</span> <span id="stat-phase">--</span></div>
-    <div class="stat-row"><span class="stat-label">Illumination:</span> <span id="stat-illum">-</span></div>
-    <div class="stat-row"><span class="stat-label">Libration:</span> <span id="stat-libration">X: 0.0° Y: 0.0°</span>
-    </div>
-  </div>
-
-  <div id="controls">
-    <div class="control-group">
-      <label for="location-select" class="control-label">🌙 Location on the Moon</label>
-      <div class="select-wrapper">
-        <select id="location-select">
-          <option value="tranquility">Sea of Tranquility</option>
-          <option value="procellarum">Oceanus Procellarum</option>
-          <option value="southpole">Lunar South Pole</option>
-          <option value="farside">Far Side — Mare Moscoviense</option>
-        </select>
-      </div>
+  <div id="app-layout">
+    <!-- ============ LEFT: Main Canvas ============ -->
+    <div id="canvas-wrap">
+      <canvas id="scene"></canvas>
     </div>
 
-    <div class="control-group date-group">
-      <label class="control-label">🕐 Mission Window</label>
-      <div class="date-row">
-        <div class="date-field">
-          <label for="start-date" class="date-label">Start</label>
-          <input type="date" id="start-date">
-        </div>
-        <div class="date-field">
-          <label for="end-date" class="date-label">End</label>
-          <input type="date" id="end-date">
-        </div>
-      </div>
-    </div>
+    <!-- ============ RIGHT: Mission Control Panel ============ -->
+    <aside id="panel">
+      <h1 class="panel-title">Mission Control</h1>
 
-    <div class="control-group action-group">
-      <button id="play-btn" type="button">▶ Play Time-Lapse</button>
-      <div class="speed-row">
-        <label for="speed-select" class="speed-label">Speed</label>
+      <!-- ── Observer ── -->
+      <section class="panel-section">
+        <h2 class="section-head">🌙 Observer</h2>
         <div class="select-wrapper">
-          <select id="speed-select">
-            <option value="1" selected>1×</option>
-            <option value="5">5×</option>
-            <option value="10">10×</option>
-            <option value="30">30×</option>
+          <select id="location-select">
+            <option value="tranquility">Sea of Tranquility</option>
+            <option value="procellarum">Oceanus Procellarum</option>
+            <option value="southpole">Lunar South Pole</option>
+            <option value="farside">Far Side — Moscoviense</option>
+            <option value="custom">Custom Coordinates…</option>
           </select>
         </div>
-      </div>
-    </div>
+        <div class="coord-row">
+          <div class="coord-field">
+            <label for="obs-lat">Lat °N</label>
+            <input type="number" id="obs-lat" min="-90" max="90" step="1" value="8">
+          </div>
+          <div class="coord-field">
+            <label for="obs-lon">Lon °E</label>
+            <input type="number" id="obs-lon" min="-180" max="180" step="1" value="31">
+          </div>
+        </div>
+      </section>
 
-    <div class="control-group slider-group">
-      <input type="range" id="timeline-slider" min="0" max="1000" value="0">
-    </div>
+      <!-- ── Data Readouts ── -->
+      <section class="panel-section">
+        <h2 class="section-head">📡 Data Readouts</h2>
+        <div class="readout"><span class="readout-label">Date</span><span id="stat-date" class="readout-val">--</span>
+        </div>
+        <div class="readout"><span class="readout-label">Phase</span><span id="stat-phase" class="readout-val">--</span>
+        </div>
+        <div class="readout"><span class="readout-label">Illumination</span><span id="stat-illum"
+            class="readout-val">-</span></div>
+        <div class="readout"><span class="readout-label">Distance</span><span id="stat-dist"
+            class="readout-val">-</span></div>
+        <div class="readout"><span class="readout-label">Libration</span><span id="stat-libration"
+            class="readout-val">-</span></div>
+        <div class="readout"><span class="readout-label">Elevation</span><span id="stat-elev"
+            class="readout-val">-</span></div>
+        <div class="readout"><span class="readout-label">Azimuth</span><span id="stat-azimuth"
+            class="readout-val">-</span></div>
+      </section>
+
+      <!-- ── Orbital View ── -->
+      <section class="panel-section orbital-section">
+        <h2 class="section-head">🛰️ Orbital View</h2>
+        <canvas id="orbital-canvas" width="200" height="200"></canvas>
+      </section>
+
+      <!-- ── Synodic Cycle ── -->
+      <section class="panel-section">
+        <h2 class="section-head">🌗 Synodic Cycle</h2>
+        <canvas id="synodic-canvas" width="260" height="48"></canvas>
+      </section>
+
+      <!-- ── Time-Lapse Controls ── -->
+      <section class="panel-section">
+        <h2 class="section-head">🕐 Mission Window</h2>
+        <div class="date-row">
+          <div class="date-field">
+            <label for="start-date" class="date-label">Start</label>
+            <input type="date" id="start-date">
+          </div>
+          <div class="date-field">
+            <label for="end-date" class="date-label">End</label>
+            <input type="date" id="end-date">
+          </div>
+        </div>
+        <div class="lapse-row">
+          <button id="play-btn" type="button">▶ Play</button>
+          <div class="speed-row">
+            <label for="speed-select" class="speed-label">Speed</label>
+            <select id="speed-select">
+              <option value="1" selected>1×</option>
+              <option value="5">5×</option>
+              <option value="10">10×</option>
+              <option value="30">30×</option>
+            </select>
+          </div>
+        </div>
+        <input type="range" id="timeline-slider" min="0" max="1000" value="0">
+      </section>
+    </aside>
   </div>
 
   <script src="app.js"></script>
