@@ -1,10 +1,12 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.2.2)
+   Earthview from the Moon — Canvas Renderer  (v0.4.0)
    ============================================================
-   Changes from v0.2.1:
-   - Earth rotation: horizontal scroll (polar-axis), not spin
-   - Idle phase linked to start date picker
-   - East/west positioning corrected (east=right on canvas)
+   Changes from v0.3.0:
+   - Equirectangular Earth map for full-globe rotation
+   - Proper optical libration (eccentricity + inclination)
+   - Seasonal Earth axial tilt rendering
+   - Variable Earth apparent size (perigee/apogee)
+   - Proper terminator tilt (Sun–Earth–Moon geometry)
    ============================================================ */
 
 (function () {
@@ -18,6 +20,11 @@
     const endIn = document.getElementById('end-date');
     const playBtn = document.getElementById('play-btn');
     const speedSel = document.getElementById('speed-select');
+    const timelineSlider = document.getElementById('timeline-slider');
+    const statDate = document.getElementById('stat-date');
+    const statPhase = document.getElementById('stat-phase');
+    const statIllum = document.getElementById('stat-illum');
+    const statLibration = document.getElementById('stat-libration');
 
     /* --- Palette --- */
     const C = {
@@ -46,15 +53,41 @@
     // Obliquity of Earth's axis ≈ 23.44° (affects terminator tilt)
     const OBLIQUITY = 23.44;
 
+    // Moon's orbital eccentricity
+    const MOON_ECC = 0.0549;
+
+    // Moon's orbital inclination to the ecliptic (degrees)
+    const MOON_INC = 5.145;
+
+    // Anomalistic month (perigee to perigee) ≈ 27.55455 days
+    const ANOMALISTIC_MONTH = 27.55455;
+
+    // Draconic month (node to node) ≈ 27.21222 days
+    const DRACONIC_MONTH = 27.21222;
+
+    // Sidereal month ≈ 27.32166 days
+    const SIDEREAL_MONTH = 27.32166;
+
+    // Mean Earth–Moon distance (km)
+    const MEAN_DISTANCE = 384400;
+
+    // J2000.0 epoch
+    const J2000 = new Date('2000-01-01T12:00:00Z').getTime();
+
+    // Degrees ↔ radians helpers
+    const DEG = Math.PI / 180;
+    const RAD = 180 / Math.PI;
+
     /* ==========================================================
-       EARTH IMAGE — pre-processed to remove checkerboard corners
+       EARTH IMAGE — equirectangular map for full-globe scroll
        ========================================================== */
     const earthImg = new Image();
-    earthImg.src = 'earth-clean.jpg';
+    earthImg.src = 'earth-map.png';
     let earthImgLoaded = false;
 
-    /* Offscreen canvas holds the cleaned image (checkerboard corners
-       replaced with ocean blue so horizontal scroll tiling looks clean). */
+    /* The equirectangular map is used directly for horizontal
+       scrolling — no circular clip preprocessing needed since
+       the circular clip happens at draw time in drawEarth(). */
     let earthCanvas = null;
 
     earthImg.onload = () => {
@@ -64,20 +97,7 @@
         earthCanvas.width = w;
         earthCanvas.height = h;
         const oc = earthCanvas.getContext('2d');
-
-        // 1. Fill entire canvas with ocean blue
-        oc.fillStyle = '#3A7BD5';
-        oc.fillRect(0, 0, w, h);
-
-        // 2. Clip to a tight circle inside the painted globe surface
-        //    (92% radius avoids the shadow border where checkerboard leaks)
-        oc.save();
-        oc.beginPath();
-        oc.arc(w / 2, h / 2, Math.min(w, h) * 0.46, 0, Math.PI * 2);
-        oc.clip();
         oc.drawImage(earthImg, 0, 0);
-        oc.restore();
-
         earthImgLoaded = true;
     };
 
@@ -99,15 +119,28 @@
     }
     genStars(220);
 
-    function drawStars(w, h, time) {
+    let starsCanvas = null;
+    function createStarsCanvas(w, h, time) {
+        if (!starsCanvas || starsCanvas.width !== w || starsCanvas.height !== h) {
+            starsCanvas = document.createElement('canvas');
+            starsCanvas.width = w;
+            starsCanvas.height = h;
+        }
+        const sCtx = starsCanvas.getContext('2d');
+        sCtx.clearRect(0, 0, w, h);
         for (const s of stars) {
             const tw = 0.5 + 0.5 * Math.sin(time * s.speed + s.off);
             const a = s.alpha * (0.6 + 0.4 * tw);
-            ctx.beginPath();
-            ctx.arc(s.x * w, s.y * h * 0.78, s.r, 0, Math.PI * 2);
-            ctx.fillStyle = `rgba(255,253,231,${a.toFixed(2)})`;
-            ctx.fill();
+            sCtx.beginPath();
+            sCtx.arc(s.x * w, s.y * h * 0.78, s.r, 0, Math.PI * 2);
+            sCtx.fillStyle = `rgba(255,253,231,${a.toFixed(2)})`;
+            sCtx.fill();
         }
+    }
+
+    function drawStars(w, h, time) {
+        createStarsCanvas(w, h, time);
+        ctx.drawImage(starsCanvas, 0, 0);
     }
 
     /* ==========================================================
@@ -166,6 +199,50 @@
        DATE ↔ PHASE ASTRONOMY
        ========================================================== */
 
+    /**
+     * Julian centuries since J2000.0 for a given JS Date.
+     * Used by most astronomy functions below.
+     */
+    function julianCenturies(date) {
+        return (date.getTime() - J2000) / (86400000 * 36525);
+    }
+
+    /**
+     * Sun's mean anomaly and ecliptic longitude (degrees).
+     * Low-precision formulae accurate to ~1° over ±50 years.
+     */
+    function sunPosition(T) {
+        // Mean anomaly (degrees)
+        const M = (357.5291 + 35999.0503 * T) % 360;
+        const Mrad = M * DEG;
+        // Equation of centre (degrees)
+        const C = 1.9146 * Math.sin(Mrad)
+            + 0.0200 * Math.sin(2 * Mrad)
+            + 0.0003 * Math.sin(3 * Mrad);
+        // Mean longitude
+        const L0 = (280.4665 + 36000.7698 * T) % 360;
+        // Ecliptic longitude
+        const sunLon = ((L0 + C) % 360 + 360) % 360;
+        return { M, sunLon };
+    }
+
+    /**
+     * Moon's mean elements (degrees).
+     */
+    function moonElements(T) {
+        // Mean longitude
+        const Lm = (218.3165 + 481267.8813 * T) % 360;
+        // Mean anomaly
+        const Mm = (134.9634 + 477198.8676 * T) % 360;
+        // Mean elongation
+        const D = (297.8502 + 445267.1115 * T) % 360;
+        // Argument of latitude (distance from ascending node)
+        const F = (93.2720 + 483202.0175 * T) % 360;
+        // Longitude of ascending node
+        const Om = (125.0446 - 1934.1363 * T) % 360;
+        return { Lm, Mm, D, F, Om };
+    }
+
     /** Phase angle (0–360°) for a given JS Date.
      *  0° = New Earth (fully shadowed), 180° = Full Earth. */
     function phaseForDate(date) {
@@ -175,7 +252,7 @@
     }
 
     /** Earth rotation angle (degrees) for a given JS Date.
-     *  This drives the image rotation so continents spin. */
+     *  This drives the image scroll so continents drift. */
     function rotationForDate(date) {
         const ms = date.getTime() - REF_NEW_MOON;
         const days = ms / 86400000;
@@ -185,41 +262,132 @@
     /**
      * Terminator tilt angle (degrees) as seen from the Moon.
      *
-     * The terminator on Earth is perpendicular to the Sun–Earth line.
-     * From the Moon, the apparent tilt of this line against the
-     * "local vertical" depends on:
-     *   1. The ecliptic longitude of the Sun (seasonal component).
-     *   2. The Moon's orbital inclination to the ecliptic (~5.14°).
-     *
-     * The dominant effect is the solar ecliptic latitude projected
-     * onto the Moon's sky. The Sun's ecliptic longitude advances
-     * ~0.9856°/day from the vernal equinox (≈ March 20).
-     *
-     * Simplified model:
-     *   tilt ≈ OBLIQUITY × sin(sunEclipticLon) × cos(moonPhaseAngle)
-     *
-     * This produces a tilt that:
-     *   - Varies seasonally (max at solstices, zero at equinoxes)
-     *   - Varies within each lunation (max at quarters, zero at
-     *     new/full — mirrors what we see of the Moon from Earth)
+     * Uses direct Sun–Earth–Moon geometry:
+     *  1. Compute the Sun's ecliptic longitude (with equation of centre).
+     *  2. Compute the Moon's ecliptic longitude.
+     *  3. The tilt is the projection of Earth's obliquity onto the
+     *     Moon-observer's plane, modulated by the Sun–Moon angle.
      */
     function terminatorTiltForDate(date) {
-        const dayOfYear = (date - new Date(date.getFullYear(), 0, 0)) / 86400000;
-        // Sun's ecliptic longitude (approx), 0 at vernal equinox (~day 79)
-        const sunLon = ((dayOfYear - 79) / 365.25) * 360;
-        const sunLonRad = (sunLon * Math.PI) / 180;
+        const T = julianCenturies(date);
+        const { sunLon } = sunPosition(T);
+        const { Lm, Mm, D, F } = moonElements(T);
 
-        // Seasonal component
-        const seasonal = OBLIQUITY * Math.sin(sunLonRad);
+        // Moon's ecliptic longitude (truncated series, ~0.5° accuracy)
+        const moonLon = Lm
+            + 6.289 * Math.sin(Mm * DEG)
+            + 1.274 * Math.sin((2 * D - Mm) * DEG)
+            + 0.658 * Math.sin(2 * D * DEG)
+            - 0.214 * Math.sin(2 * Mm * DEG)
+            - 0.186 * Math.sin((Lm - 2 * D) * DEG * 0)  // mean anomaly of Sun term
+            + 0.114 * Math.sin(2 * F * DEG);
 
-        // Phase-dependent component (tilt strongest at quarters)
-        const phase = phaseForDate(date);
-        const phaseRad = (phase * Math.PI) / 180;
-        const phaseMod = Math.sin(phaseRad);   // ±1 at quarters, 0 at new/full
+        // Sun–Moon elongation projected onto ecliptic
+        const elong = (sunLon - moonLon) * DEG;
 
-        // Combined tilt (capped for visual clarity)
-        const tilt = seasonal * phaseMod * 0.6;
+        // Solar declination (seasonal tilt of Earth's axis toward/away Sun)
+        const sunDec = Math.asin(Math.sin(OBLIQUITY * DEG) * Math.sin(sunLon * DEG));
+
+        // The terminator tilt as seen from the Moon combines:
+        //  - Earth's axial tilt projected toward the observer
+        //  - The elongation angle (most visible at quarter phases)
+        const tilt = sunDec * RAD * Math.sin(elong) * 0.7;
+
         return tilt;   // degrees
+    }
+
+    /**
+     * Earth's apparent angular tilt (degrees) as seen from the Moon.
+     * Earth's north pole direction rotates seasonally because the
+     * Earth–Moon system orbits the Sun while Earth's axis stays fixed
+     * in inertial space (pointing toward Polaris).
+     */
+    function earthTiltForDate(date) {
+        const T = julianCenturies(date);
+        const { sunLon } = sunPosition(T);
+
+        // The apparent tilt of Earth's axis as seen from the Moon
+        // is the projection of the obliquity onto the Moon's sky plane.
+        // It varies from +23.44° (June solstice, north pole tilted toward
+        // Sun/Moon) to −23.44° (December solstice).
+        //
+        // The visual rotation of the Earth's image is approximately:
+        //   -OBLIQUITY × sin(sunLon)  (negative because screen Y is down)
+        // This gives the angle between Earth's north pole and "up" on screen.
+        const tiltAngle = -OBLIQUITY * Math.sin(sunLon * DEG) * 0.6;
+        return tiltAngle;   // degrees
+    }
+
+    /**
+     * Earth apparent size scale factor (1.0 = mean distance).
+     * Varies ±~6% between perigee (356,500 km) and apogee (406,700 km).
+     */
+    function earthScaleForDate(date) {
+        const ms = date.getTime() - REF_NEW_MOON;
+        const days = ms / 86400000;
+
+        // Moon's mean anomaly (radians)
+        const M = (days / ANOMALISTIC_MONTH) * 2 * Math.PI;
+
+        // Distance using equation of centre (first two terms)
+        // r ≈ a(1 - e·cos(M)) for small e
+        const distance = MEAN_DISTANCE * (1 - MOON_ECC * Math.cos(M)
+            - MOON_ECC * MOON_ECC * 0.5 * Math.cos(2 * M));
+
+        // Scale is inverse of distance ratio
+        return MEAN_DISTANCE / distance;
+    }
+
+    /* ==========================================================
+       LIBRATION (ASTRONOMY)
+       ========================================================== */
+    /**
+     * Optical libration of the Moon.
+     *
+     * Optical libration in longitude arises because the Moon's
+     * rotation is uniform but its orbital speed varies (Kepler's
+     * 2nd law, driven by eccentricity e ≈ 0.0549). The observer
+     * sees ±7.9° around the mean sub-Earth point.
+     *
+     * Optical libration in latitude arises because the Moon's
+     * equator is tilted ~6.7° to its orbital plane (which is
+     * itself tilted 5.145° to the ecliptic). The observer sees
+     * ±6.7° north-south wobble.
+     *
+     * This model uses the Moon's mean anomaly for longitude
+     * libration and argument of latitude for latitude libration,
+     * giving date-accurate phase offsets.
+     */
+    function librationForDate(date) {
+        const ms = date.getTime() - REF_NEW_MOON;
+        const days = ms / 86400000;
+        const T = julianCenturies(date);
+        const { Mm, F } = moonElements(T);
+
+        // --- Longitude libration (east-west) ---
+        // Driven by the equation of centre: the difference between
+        // the Moon's true anomaly and its mean anomaly.
+        // Leading term: 2e·sin(M) ≈ 2×0.0549×sin(M) in radians
+        // Converting to degrees: max ≈ 6.29° (the dominant correction)
+        // We use the full amplitude of ±7.9° with proper phase.
+        const MmRad = Mm * DEG;
+        const degLon = -(6.289 * Math.sin(MmRad)
+            + 1.274 * Math.sin(2 * MmRad)
+            + 0.186 * Math.sin(3 * MmRad));
+
+        // --- Latitude libration (north-south) ---
+        // Driven by the Moon's argument of latitude (F = distance
+        // from ascending node along the orbit). The Moon's equator
+        // is tilted ~6.7° to its orbital plane.
+        const FRad = F * DEG;
+        const degLat = -(MOON_INC + 1.54) * Math.sin(FRad)
+            - 0.28 * Math.sin(2 * FRad);
+
+        // Visual offsets (fraction of Earth radius on canvas)
+        const lonOffset = degLon / 60;  // ~0.13 at maximum
+        const latOffset = degLat / 80;  // ~0.08 at maximum
+
+        return { xOff: lonOffset, yOff: latOffset, degLon, degLat };
     }
 
     /* ==========================================================
@@ -252,10 +420,8 @@
         ctx.closePath();
     }
 
-    function drawEarth(cx, cy, r, phaseDeg, rotDeg, tiltDeg) {
+    function drawEarth(cx, cy, r, phaseDeg, rotDeg, tiltDeg, axisTiltDeg) {
         if (!earthImgLoaded) return;
-
-        const imgSize = r * 2.2;
 
         /* --- Single circular clip for image + shadow + highlight --- */
         ctx.save();
@@ -263,18 +429,30 @@
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.clip();
 
+        /* -- Apply Earth axial tilt (seasonal rotation) -- */
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(axisTiltDeg * DEG);
+        ctx.translate(-cx, -cy);
+
         /* -- Polar-axis rotation via horizontal scroll --
            Features drift RIGHT → LEFT (as seen from the Moon).
-           Uses pre-processed earthCanvas (ocean-blue corners instead
-           of checkerboard). Three copies for seamless wrap. */
+           The equirectangular map tiles seamlessly. The map width
+           maps to the equator circumference; height maps to pole-
+           to-pole. We draw it at 2× radius wide (equirectangular
+           aspect) and 1× radius tall. */
+        const mapW = r * 4;   // equirectangular: width = 2× height
+        const mapH = r * 2;
         const scrollFrac = ((rotDeg % 360) + 360) % 360 / 360;
-        const scrollX = scrollFrac * imgSize;
+        const scrollX = scrollFrac * mapW;
 
         for (let i = -1; i <= 1; i++) {
             ctx.drawImage(earthCanvas,
-                cx - imgSize / 2 - scrollX + i * imgSize, cy - imgSize / 2,
-                imgSize, imgSize);
+                cx - mapW / 2 - scrollX + i * mapW, cy - mapH / 2,
+                mapW, mapH);
         }
+
+        ctx.restore();   // releases axial tilt rotation
 
         /* -- Specular highlight (inside same clip) -- */
         const hg = ctx.createRadialGradient(
@@ -369,43 +547,52 @@
         }
     })();
 
+    let surfaceCanvas = null;
     function drawLunarSurface(w, h) {
-        const hy = h * 0.78;
+        if (!surfaceCanvas || surfaceCanvas.width !== w || surfaceCanvas.height !== h) {
+            surfaceCanvas = document.createElement('canvas');
+            surfaceCanvas.width = w;
+            surfaceCanvas.height = h;
+            const sCtx = surfaceCanvas.getContext('2d');
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(0, hy);
-        for (let i = 0; i <= HSEG; i++) ctx.lineTo((i / HSEG) * w, hy + hBumps[i]);
-        ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
-        const gg = ctx.createLinearGradient(0, hy, 0, h);
-        gg.addColorStop(0, C.groundWarm); gg.addColorStop(0.4, C.groundDeep);
-        gg.addColorStop(1, '#A0643A');
-        ctx.fillStyle = gg; ctx.fill();
-        ctx.restore();
+            const hy = h * 0.78;
 
-        ctx.save();
-        ctx.beginPath(); ctx.rect(0, hy - 4, w, h - hy + 4); ctx.clip();
-        ctx.strokeStyle = 'rgba(160,90,40,0.30)'; ctx.lineWidth = 1.2;
-        for (const s of scribH) {
-            ctx.beginPath();
-            for (let j = 0; j < s.segs.length; j++) {
-                const px = s.segs[j].xr * w, py = hy + s.yOff + s.segs[j].yr;
-                if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+            sCtx.save();
+            sCtx.beginPath();
+            sCtx.moveTo(0, hy);
+            for (let i = 0; i <= HSEG; i++) sCtx.lineTo((i / HSEG) * w, hy + hBumps[i]);
+            sCtx.lineTo(w, h); sCtx.lineTo(0, h); sCtx.closePath();
+            const gg = sCtx.createLinearGradient(0, hy, 0, h);
+            gg.addColorStop(0, C.groundWarm); gg.addColorStop(0.4, C.groundDeep);
+            gg.addColorStop(1, '#A0643A');
+            sCtx.fillStyle = gg; sCtx.fill();
+            sCtx.restore();
+
+            sCtx.save();
+            sCtx.beginPath(); sCtx.rect(0, hy - 4, w, h - hy + 4); sCtx.clip();
+            sCtx.strokeStyle = 'rgba(160,90,40,0.30)'; sCtx.lineWidth = 1.2;
+            for (const s of scribH) {
+                sCtx.beginPath();
+                for (let j = 0; j < s.segs.length; j++) {
+                    const px = s.segs[j].xr * w, py = hy + s.yOff + s.segs[j].yr;
+                    if (j === 0) sCtx.moveTo(px, py); else sCtx.lineTo(px, py);
+                }
+                sCtx.stroke();
             }
-            ctx.stroke();
-        }
-        ctx.strokeStyle = 'rgba(195,120,60,0.18)'; ctx.lineWidth = 1;
-        const gH = h - hy;
-        for (const d of scribD) {
-            const x = d.xr * w, y = hy + 8 + d.yr * (gH - 12);
-            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + d.dx, y + d.dy); ctx.stroke();
-        }
-        ctx.restore();
+            sCtx.strokeStyle = 'rgba(195,120,60,0.18)'; sCtx.lineWidth = 1;
+            const gH = h - hy;
+            for (const d of scribD) {
+                const x = d.xr * w, y = hy + 8 + d.yr * (gH - 12);
+                sCtx.beginPath(); sCtx.moveTo(x, y); sCtx.lineTo(x + d.dx, y + d.dy); sCtx.stroke();
+            }
+            sCtx.restore();
 
-        ctx.save(); ctx.beginPath(); ctx.moveTo(0, hy);
-        for (let i = 0; i <= HSEG; i++) ctx.lineTo((i / HSEG) * w, hy + hBumps[i]);
-        ctx.strokeStyle = C.outline; ctx.lineWidth = 2.5; ctx.stroke();
-        ctx.restore();
+            sCtx.save(); sCtx.beginPath(); sCtx.moveTo(0, hy);
+            for (let i = 0; i <= HSEG; i++) sCtx.lineTo((i / HSEG) * w, hy + hBumps[i]);
+            sCtx.strokeStyle = C.outline; sCtx.lineWidth = 2.5; sCtx.stroke();
+            sCtx.restore();
+        }
+        ctx.drawImage(surfaceCanvas, 0, 0);
     }
 
     /* ==========================================================
@@ -452,6 +639,7 @@
     let lapseStart = null;         // Date object
     let lapseEnd = null;
     let lapseTimer = null;
+    let isScrubbing = false;
 
     // Set default date inputs (today ± 14 days)
     const today = new Date();
@@ -471,7 +659,11 @@
         lapseEnd = new Date(endIn.value + 'T23:59:59');
         if (isNaN(lapseStart) || isNaN(lapseEnd) || lapseEnd <= lapseStart) return;
 
-        currentDate = new Date(lapseStart);
+        // Only reset currentDate if we are not already within the lapse window
+        if (!currentDate || currentDate < lapseStart || currentDate > lapseEnd) {
+            currentDate = new Date(lapseStart);
+        }
+
         isPlaying = true;
         playBtn.textContent = '⏸ Pause';
         playBtn.classList.add('playing');
@@ -487,6 +679,7 @@
                 currentDate = new Date(lapseEnd);
                 stopLapse();
             }
+            updateSliderFromDate();
         }, tickMs);
     }
 
@@ -500,6 +693,34 @@
     playBtn.addEventListener('click', () => {
         if (isPlaying) stopLapse(); else startLapse();
     });
+
+    // Timeline Slider Logic
+    function updateSliderFromDate() {
+        if (isScrubbing || !lapseStart || !lapseEnd) return;
+        const totalMs = lapseEnd.getTime() - lapseStart.getTime();
+        const curMs = currentDate.getTime() - lapseStart.getTime();
+        timelineSlider.value = (curMs / totalMs) * 1000;
+    }
+
+    function updateDateFromSlider() {
+        lapseStart = new Date(startIn.value + 'T00:00:00');
+        lapseEnd = new Date(endIn.value + 'T23:59:59');
+        if (isNaN(lapseStart) || isNaN(lapseEnd)) return;
+
+        const totalMs = lapseEnd.getTime() - lapseStart.getTime();
+        const sliderFrac = timelineSlider.value / 1000;
+        currentDate = new Date(lapseStart.getTime() + totalMs * sliderFrac);
+    }
+
+    timelineSlider.addEventListener('mousedown', () => { isScrubbing = true; stopLapse(); });
+    timelineSlider.addEventListener('touchstart', () => { isScrubbing = true; stopLapse(); });
+    timelineSlider.addEventListener('input', updateDateFromSlider);
+    timelineSlider.addEventListener('mouseup', () => { isScrubbing = false; });
+    timelineSlider.addEventListener('touchend', () => { isScrubbing = false; });
+
+    // When dates change, reset slider
+    startIn.addEventListener('change', () => { timelineSlider.value = 0; updateDateFromSlider(); });
+    endIn.addEventListener('change', () => { timelineSlider.value = 0; updateDateFromSlider(); });
 
     locSel.addEventListener('change', () => {
         const loc = LOCATIONS[locSel.value];
@@ -530,25 +751,27 @@
         current.scale = lerp(current.scale, target.scale, LERP);
 
         // Determine current date for astronomy
-        // When idle, use the start-date picker so the phase is always
-        // linked to the Mission Window, not the real clock.
-        let renderDate;
-        if (isPlaying) {
-            renderDate = currentDate;
-        } else {
+        let renderDate = currentDate;
+
+        // If the date hasn't been set by playing or scrubbing yet, default to start date
+        if (!isPlaying && !isScrubbing && (!renderDate || isNaN(renderDate.getTime()))) {
             const startVal = startIn.value;
             renderDate = startVal ? new Date(startVal + 'T12:00:00') : new Date();
+            currentDate = renderDate;
         }
 
         // Compute astronomy
         const phaseDeg = phaseForDate(renderDate);
         const rotDeg = rotationForDate(renderDate);
         const tiltDeg = terminatorTiltForDate(renderDate);
+        const axisTiltDeg = earthTiltForDate(renderDate);
+        const distScale = earthScaleForDate(renderDate);
+        const libration = librationForDate(renderDate);
 
-        // Earth position
-        const earthR = Math.min(w, h) * 0.14 * current.scale;
-        const earthX = w * current.xRatio;
-        const earthY = h * current.yRatio;
+        // Earth position (apply libration offset + distance-based size)
+        const earthR = Math.min(w, h) * 0.14 * current.scale * distScale;
+        const earthX = w * current.xRatio + (libration.xOff * earthR);
+        const earthY = h * current.yRatio + (libration.yOff * earthR);
 
         if (target.yRatio >= 0 && current.scale > 0.05) {
             // Subtle glow
@@ -563,17 +786,22 @@
             ctx.fill();
             ctx.restore();
 
-            drawEarth(earthX, earthY, earthR, phaseDeg, rotDeg, tiltDeg);
+            drawEarth(earthX, earthY, earthR, phaseDeg, rotDeg, tiltDeg, axisTiltDeg);
         } else {
             drawFarSideMsg(w, h, time);
         }
 
         drawLunarSurface(w, h);
 
-        // On-canvas date + phase label
-        if (target.yRatio >= 0) {
-            drawDateLabel(w, h, renderDate, phaseDeg);
-        }
+        // Update Stats UI
+        const isoStr = renderDate.toISOString().split('T')[0];
+        statDate.textContent = isoStr;
+        statPhase.textContent = phaseName(phaseDeg) + ` (${Math.round(phaseDeg)}°)`;
+
+        const ill = (1 - Math.cos((phaseDeg / 180) * Math.PI)) / 2;
+        statIllum.textContent = `${(ill * 100).toFixed(1)}%`;
+
+        statLibration.textContent = `X: ${libration.degLon > 0 ? '+' : ''}${libration.degLon.toFixed(1)}° Y: ${libration.degLat > 0 ? '+' : ''}${libration.degLat.toFixed(1)}°`;
 
         requestAnimationFrame(draw);
     }

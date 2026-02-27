@@ -1,3 +1,19 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  #error-log { position: fixed; top: 0; left: 0; background: red; color: white; z-index: 9999; padding: 20px; font-family: monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="error-log"></div>
+<script>
+  window.onerror = function(msg, url, line, col, error) {
+      document.getElementById('error-log').innerText += msg + '
+' + (error ? error.stack : '');
+  };
+</script>
 <!DOCTYPE html>
 <html lang="en">
 
@@ -74,4 +90,6 @@
   <script src="app.js"></script>
 </body>
 
+</html>
+</body>
 </html>

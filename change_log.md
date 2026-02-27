@@ -16,6 +16,37 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.4.0] — 2026-02-26
+
+### 🔭 Astronomical Accuracy Overhaul
+
+### Added (Minor)
+- **Equirectangular Earth map**: Generated a full equirectangular projection map (`earth-map.png`) in hand-painted style. Earth now shows all continents during rotation instead of ocean-blue fill for the back hemisphere.
+- **Earth axial tilt rendering**: Earth's image now rotates seasonally so the north pole points in the correct direction as seen from the Moon. Tilt varies from +23.44° (June solstice) to −23.44° (December solstice).
+- **Variable Earth apparent size**: Earth's apparent diameter now changes ±~6% between perigee (~356,500 km) and apogee (~406,700 km), computed from the Moon's mean anomaly and orbital eccentricity.
+- **Solar/lunar ephemeris functions**: Added `julianCenturies()`, `sunPosition()`, `moonElements()` — low-precision ephemeris functions computing J2000-based mean elements accurate to ~1° over ±50 years.
+
+### Changed (Minor)
+- **Libration model**: Replaced simple sine-wave approximation with proper optical libration driven by the Moon's mean anomaly (longitude libration, ±7.9°) and argument of latitude (latitude libration, ±6.7°). Now date-accurate rather than fixed-phase.
+- **Terminator tilt**: Replaced approximate seasonal formula with direct Sun–Earth–Moon geometry. Uses truncated lunar ecliptic longitude series (~0.5° accuracy) and proper solar declination for angle computation.
+- **Earth image source**: Switched from `earth-clean.jpg` (single-hemisphere painted globe) to `earth-map.png` (full equirectangular map). Image preprocessing simplified — no circular clip needed since the map tiles seamlessly for horizontal scrolling.
+
+---
+
+## [0.3.0] — 2026-02-26
+
+### 🚀 Performance, Accuracy, & UX Upgrades
+
+### Added (Minor)
+- **Timeline Scrubber**: Added an interactive slider beneath the time-lapse controls that allows users to manually scrub through the selected date range and see the phase change instantly.
+- **Stats Panel**: Added a comprehensive data overlay in the top-left corner that displays the real-time simulation Date, Phase Name and Angle, Illumination percentage, and Libration offset.
+- **Lunar Libration**: Implemented simplified sine-wave approximations of the Moon's anomalistic and draconic months to simulate lunar libration. Earth now realistically wobbles along the X and Y axes over the course of a simulated month.
+
+### Changed (Patch)
+- **Performance Optimization**: The starry sky and the textured lunar surface are now rendered once to off-screen canvases (`starsCanvas` and `surfaceCanvas`) and stamped onto the main context via `drawImage`. This drastic improvement eliminates hundreds of path and `rgba` calculations per frame in the main animation loop.
+
+---
+
 ## [0.2.2] — 2026-02-25
 
 ### 🔧 Rotation, Phase Link & East/West Correction
