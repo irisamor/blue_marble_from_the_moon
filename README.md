@@ -46,7 +46,9 @@ The simulation uses real orbital mechanics — not fake slider values:
 
 ## 🚀 Getting Started
 
-No build tools, no `npm install`, no frameworks. Just serve the files:
+No build tools, no `npm install`, no frameworks. However, because the astronomical engine uses advanced canvas pixel manipulation (`getImageData`) for the orthographic 3D projection, **it must be run through a local web server**. Modern browsers will block these pixel operations due to CORS security policies if you simply double-click `index.html`.
+
+Just serve the files locally:
 
 ```bash
 cd 202602_earthview_from_moon
@@ -54,7 +56,11 @@ python3 -m http.server 8080
 # Open http://localhost:8080
 ```
 
-Or simply open `index.html` directly in your browser.
+### How to Share
+
+Because this is a pure Vanilla HTML/CSS/JS application with zero dependencies, sharing it is incredibly easy:
+1. **GitHub Pages / Netlify / Vercel:** You can instantly deploy this app for free by dropping the folder into Netlify or pushing it to a GitHub repo with GitHub Pages enabled.
+2. **Send a ZIP:** Send the folder to a friend and tell them to run the `python3 -m http.server` command above.
 
 ## 📁 Project Structure
 
