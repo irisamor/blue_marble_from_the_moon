@@ -1,11 +1,12 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.2.0)
+   Earthview from the Moon — Canvas Renderer  (v0.2.1)
    ============================================================
-   Changes from v0.1.0:
-   - Earth drawn from earth-sketch.jpg image (rotated per date)
-   - Astronomically accurate X/Y positioning per Moon location
-   - Tilted terminator (shadow angle matches Sun-Earth geometry)
-   - Flight Director time-lapse with date pickers + play/pause
+   Changes from v0.2.0:
+   - Image source: earth-clean.jpg
+   - Shadow strictly clipped inside globe circle
+   - Earth rotation direction: counterclockwise (correct for Moon)
+   - Procellarum position: east=left in sky convention
+   - Date label moved above horizon
    ============================================================ */
 
 (function () {
@@ -51,7 +52,7 @@
        EARTH IMAGE
        ========================================================== */
     const earthImg = new Image();
-    earthImg.src = 'earth-sketch.jpg';
+    earthImg.src = 'earth-clean.jpg';
     let earthImgLoaded = false;
     earthImg.onload = () => { earthImgLoaded = true; };
 
@@ -89,25 +90,26 @@
        ==========================================================
        Selenographic coords → angular distance from sub-Earth
        point → elevation / azimuth → canvas X/Y.
-  
+
        Sub-Earth point ≈ 0°N, 0°E.
        Elevation = 90° − angular_distance.
        Azimuth maps to horizontal position.
-  
+       Sky convention: East = LEFT, West = RIGHT.
+
        Location               Coords        Dist  Elev  Az     X%   Y%   Scale
-       Sea of Tranquility     8°N, 31°E     ~32°  58°   West   38   25   1.0
-       Oceanus Procellarum    18°N, 57°W    ~60°  30°   East   72   50   0.92
+       Sea of Tranquility     8°N, 31°E     ~32°  58°   West   62   25   1.0
+       Oceanus Procellarum    18°N, 57°W    ~60°  30°   East   25   55   0.92
        Lunar South Pole       90°S, 0°      ~84°   6°   North  50   68   0.82
        Far Side (Moscoviense) 27°N, 148°E   ~150° <0°   —      —    —    0
        ========================================================== */
     const LOCATIONS = {
-        tranquility: { xRatio: 0.38, yRatio: 0.25, scale: 1.0 },
-        procellarum: { xRatio: 0.72, yRatio: 0.50, scale: 0.92 },
+        tranquility: { xRatio: 0.62, yRatio: 0.25, scale: 1.0 },
+        procellarum: { xRatio: 0.25, yRatio: 0.55, scale: 0.92 },
         southpole: { xRatio: 0.50, yRatio: 0.68, scale: 0.82 },
         farside: { xRatio: 0.50, yRatio: -1, scale: 0 },
     };
 
-    let current = { xRatio: 0.38, yRatio: 0.25, scale: 1.0 };
+    let current = { xRatio: 0.62, yRatio: 0.25, scale: 1.0 };
     let target = { ...current };
     const LERP = 0.045;
     function lerp(a, b, t) { return a + (b - a) * t; }
@@ -220,26 +222,21 @@
     function drawEarth(cx, cy, r, phaseDeg, rotDeg, tiltDeg) {
         if (!earthImgLoaded) return;
 
-        /* --- Draw image inside circular clip, rotated --- */
+        /* --- Single circular clip for image + shadow + highlight --- */
         ctx.save();
         ctx.beginPath();
-        ctx.arc(cx, cy, r - 1, 0, Math.PI * 2);
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.clip();
 
+        /* -- Image (counterclockwise rotation = east-to-west drift) -- */
+        ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate((rotDeg * Math.PI) / 180);
-
-        // Scale image to cover the circle
+        ctx.rotate((-rotDeg * Math.PI) / 180);   // negative = CCW = correct
         const imgSize = r * 2.2;
         ctx.drawImage(earthImg, -imgSize / 2, -imgSize / 2, imgSize, imgSize);
-
         ctx.restore();
 
-        /* --- Specular highlight --- */
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
-        ctx.clip();
+        /* -- Specular highlight (inside same clip) -- */
         const hg = ctx.createRadialGradient(
             cx - r * 0.28, cy - r * 0.28, r * 0.02,
             cx - r * 0.1, cy - r * 0.1, r * 0.55
@@ -247,13 +244,16 @@
         hg.addColorStop(0, 'rgba(255,255,255,0.25)');
         hg.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = hg;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.restore();
 
-        /* --- Phase shadow with tilt --- */
-        drawPhaseShadow(cx, cy, r, phaseDeg, tiltDeg);
+        /* -- Phase shadow with tilt (inside same clip) -- */
+        drawPhaseShadowInClip(cx, cy, r, phaseDeg, tiltDeg);
 
-        /* --- Wobbly outline --- */
+        ctx.restore();   // releases the clip
+
+        /* --- Wobbly outline (outside clip) --- */
         wobbleCircle(cx, cy, r, 90, r * 0.012);
         ctx.strokeStyle = C.outline;
         ctx.lineWidth = 3.5;
@@ -261,21 +261,16 @@
     }
 
     /**
-     * Phase terminator shadow, now with tilt rotation.
+     * Phase terminator shadow — called INSIDE the globe clip.
      * phaseDeg 0 = New Earth (full shadow), 180 = Full (no shadow).
      * tiltDeg = rotation of the terminator line.
      */
-    function drawPhaseShadow(cx, cy, r, phaseDeg, tiltDeg) {
+    function drawPhaseShadowInClip(cx, cy, r, phaseDeg, tiltDeg) {
         const d = ((phaseDeg % 360) + 360) % 360;
         const phaseAngle = Math.PI - (d / 180) * Math.PI;
         const terminatorW = Math.abs(Math.cos(phaseAngle)) * r;
 
         ctx.save();
-        // Clip to Earth
-        ctx.beginPath();
-        ctx.arc(cx, cy, r + 1, 0, Math.PI * 2);
-        ctx.clip();
-
         // Apply tilt rotation around Earth centre
         ctx.translate(cx, cy);
         ctx.rotate((tiltDeg * Math.PI) / 180);
@@ -283,12 +278,10 @@
 
         ctx.beginPath();
         if (d <= 180) {
-            // Shadow on right, shrinking toward Full
             ctx.arc(cx, cy, r + 2, -Math.PI / 2, Math.PI / 2, false);
             ctx.ellipse(cx, cy, terminatorW, r + 2, 0,
                 Math.PI / 2, -Math.PI / 2, d > 90);
         } else {
-            // Shadow on left, growing past Full
             ctx.arc(cx, cy, r + 2, Math.PI / 2, -Math.PI / 2, false);
             ctx.ellipse(cx, cy, terminatorW, r + 2, 0,
                 -Math.PI / 2, Math.PI / 2, d < 270);
@@ -404,10 +397,10 @@
         ctx.fillStyle = 'rgba(255,253,231,0.75)';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(dateStr, 20, h * 0.78 - 14);
+        ctx.fillText(dateStr, 20, h * 0.78 - 58);
         ctx.font = '15px Patrick Hand';
         ctx.fillStyle = 'rgba(255,253,231,0.50)';
-        ctx.fillText(phaseStr, 20, h * 0.78 + 2);
+        ctx.fillText(phaseStr, 20, h * 0.78 - 40);
         ctx.restore();
     }
 

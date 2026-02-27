@@ -16,6 +16,22 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.2.1] — 2026-02-25
+
+### 🔧 Visual & Astronomical Fixes
+
+### Fixed (Patch)
+- **Shadow clipping**: Phase shadow now drawn inside a single circular `clip()` path shared with the Earth image — no bleed outside the globe.
+- **Earth rotation direction**: Corrected to counterclockwise (features drift right-to-left as seen from the Moon, matching the east=left sky convention).
+- **Oceanus Procellarum position**: Earth moved to the LEFT side of the canvas (X:25%, Y:55%) — east is left in astronomical sky charts.
+- **Sea of Tranquility position**: Correspondingly moved to upper-right (X:62%, Y:25%) — west is right.
+- **Date label overlap**: Moved up ~44px so it floats clearly in the sky above the lunar horizon.
+
+### Changed (Patch)
+- **Earth image**: Source updated from `earth-sketch.jpg` to `earth-clean.jpg`.
+
+---
+
 ## [0.2.0] — 2026-02-25
 
 ### 🚀 Image-Based Earth, Astronomical Positioning & Flight Director
