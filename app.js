@@ -397,13 +397,15 @@
         ctx.restore();
 
         // Soft atmospheric glow and slight darkening at the terminator edge
+        // Brightened for "blue marble" feel based on user feedback
         const hg = ctx.createRadialGradient(
-            cx - r * 0.3, cy - r * 0.3, r * 0.1,
-            cx - r * 0.1, cy - r * 0.1, r * 0.8
+            cx - r * 0.35, cy - r * 0.35, r * 0.05,
+            cx, cy, r
         );
-        hg.addColorStop(0, 'rgba(255,255,255,0.15)');
-        hg.addColorStop(0.7, 'rgba(255,255,255,0)');
-        hg.addColorStop(1, 'rgba(0,0,0,0.4)');
+        hg.addColorStop(0, 'rgba(255, 255, 255, 0.15)'); // Subtle bright spot
+        hg.addColorStop(0.6, 'rgba(255, 255, 255, 0)');  // Transparent over main surface
+        hg.addColorStop(0.9, 'rgba(60, 150, 255, 0.15)'); // Cyan atmospheric scattering
+        hg.addColorStop(1, 'rgba(0, 0, 0, 0.3)');        // Gentle shadow at very edge
         ctx.fillStyle = hg;
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -643,9 +645,26 @@
         orbitalCtx.beginPath();
         orbitalCtx.arc(cx, cy, earthR, 0, Math.PI * 2);
         orbitalCtx.clip();
-        // Lit side
+        // Lit side (ocean base)
         orbitalCtx.fillStyle = '#3A7BD5';
         orbitalCtx.fillRect(cx - earthR, cy - earthR, earthR * 2, earthR * 2);
+        
+        // Simple stylized continents (white/grey)
+        orbitalCtx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+        // Americas (approximate)
+        orbitalCtx.beginPath();
+        orbitalCtx.ellipse(cx - earthR * 0.4, cy - earthR * 0.2, earthR * 0.3, earthR * 0.5, -0.3, 0, Math.PI * 2);
+        orbitalCtx.fill();
+        orbitalCtx.beginPath();
+        orbitalCtx.ellipse(cx - earthR * 0.2, cy + earthR * 0.4, earthR * 0.2, earthR * 0.5, 0.4, 0, Math.PI * 2);
+        orbitalCtx.fill();
+        // Eurasia/Africa (approximate)
+        orbitalCtx.beginPath();
+        orbitalCtx.ellipse(cx + earthR * 0.4, cy - earthR * 0.2, earthR * 0.4, earthR * 0.3, 0.2, 0, Math.PI * 2);
+        orbitalCtx.fill();
+        orbitalCtx.beginPath();
+        orbitalCtx.ellipse(cx + earthR * 0.3, cy + earthR * 0.3, earthR * 0.3, earthR * 0.4, 0.1, 0, Math.PI * 2);
+        orbitalCtx.fill();
         // Night side: half-circle opposite to Sun
         orbitalCtx.beginPath();
         const nightStartA = sunAngle + Math.PI / 2;
