@@ -1,5 +1,5 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.5.1)
+   Earthview from the Moon — Canvas Renderer  (v0.5.2)
    ============================================================
    Changes from v0.4.0:
    - Mission Control side-panel dashboard
@@ -68,7 +68,7 @@
        EARTH IMAGE — equirectangular map for full-globe scroll
        ========================================================== */
     const earthImg = new Image();
-    earthImg.src = 'earth-realistic.jpg';
+    earthImg.src = 'earth-blue-marble.jpg';
     let earthImgLoaded = false;
     let earthCanvas = null;
     let surfaceCanvas = null;
@@ -396,16 +396,14 @@
 
         ctx.restore();
 
-        // Soft atmospheric glow and slight darkening at the terminator edge
-        // Brightened for "blue marble" feel based on user feedback
+        // Atmospheric rim (pure light, no darkening) to preserve Blue Marble brightness
         const hg = ctx.createRadialGradient(
-            cx - r * 0.35, cy - r * 0.35, r * 0.05,
+            cx, cy, r * 0.6,
             cx, cy, r
         );
-        hg.addColorStop(0, 'rgba(255, 255, 255, 0.15)'); // Subtle bright spot
-        hg.addColorStop(0.6, 'rgba(255, 255, 255, 0)');  // Transparent over main surface
-        hg.addColorStop(0.9, 'rgba(60, 150, 255, 0.15)'); // Cyan atmospheric scattering
-        hg.addColorStop(1, 'rgba(0, 0, 0, 0.3)');        // Gentle shadow at very edge
+        hg.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        hg.addColorStop(0.85, 'rgba(80, 180, 255, 0.1)');
+        hg.addColorStop(1, 'rgba(100, 200, 255, 0.4)');
         ctx.fillStyle = hg;
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -640,7 +638,7 @@
         orbitalCtx.fillText('Sun', sunLabelX, sunLabelY - 12);
 
         // Earth (center) with day/night shading
-        const earthR = 12;
+        const earthR = 18;
         orbitalCtx.save();
         orbitalCtx.beginPath();
         orbitalCtx.arc(cx, cy, earthR, 0, Math.PI * 2);
@@ -648,7 +646,7 @@
         // Lit side (ocean base)
         orbitalCtx.fillStyle = '#3A7BD5';
         orbitalCtx.fillRect(cx - earthR, cy - earthR, earthR * 2, earthR * 2);
-        
+
         // Simple stylized continents (white/grey)
         orbitalCtx.fillStyle = 'rgba(255, 255, 255, 0.35)';
         // Americas (approximate)
@@ -682,7 +680,7 @@
         orbitalCtx.stroke();
 
         // Moon with day/night shading
-        const moonR = 5;
+        const moonR = 8;
         orbitalCtx.save();
         orbitalCtx.beginPath();
         orbitalCtx.arc(moonX, moonY, moonR, 0, Math.PI * 2);

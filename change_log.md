@@ -16,6 +16,17 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.5.2] — 2026-02-27
+
+### ✨ Blue Marble Aesthetics
+
+### Changed (Patch)
+- **Earth texture**: Migrated to a pristine NASA Blue Marble 2K dataset (`earth-blue-marble.jpg`) to accurately reflect modern global terrain and polar ice extents.
+- **Earth rendering**: Restructured the atmospheric additive glow. Removed the residual inner dark shading to ensure the "Full Earth" phase is brightly lit and vibrant across the daytime disk.
+- **Orbital mini-map**: Enlarged both the Earth and Moon display radii by 50% for better clarity. Styled continent placements automatically scale with the new size.
+
+---
+
 ## [0.5.1] — 2026-02-27
 
 ### 📸 Realistic Aesthetics Upgrade
