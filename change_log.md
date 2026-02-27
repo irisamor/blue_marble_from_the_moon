@@ -16,6 +16,16 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.5.7] — 2026-02-27
+
+### ☀️ Sunlight Indicator Tweaks
+
+### Changed (Patch)
+- **Orbital Mini-Map**: Adjusted the sunlight indicator lines to render 7 parallel rays (up from 5). The lines are now slightly thicker and shorter, specifically stopping before crossing the lunar orbit line to reduce visual clutter. 
+- **Sunlight Arrows**: Added directional arrowheads to all 7 sunlight lines to better indicate the flow of light across the system.
+
+---
+
 ## [0.5.6] — 2026-02-27
 
 ### 📍 Guanghan Observer Default

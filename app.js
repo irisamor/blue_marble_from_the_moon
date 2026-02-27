@@ -1,5 +1,5 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.5.6)
+   Earthview from the Moon — Canvas Renderer  (v0.5.7)
    ============================================================
    Changes from v0.4.0:
    - Mission Control side-panel dashboard
@@ -751,36 +751,34 @@
         const sunDy = Math.sin(sunAngle);
         orbitalCtx.save();
         orbitalCtx.strokeStyle = 'rgba(255,220,80,0.45)';
-        orbitalCtx.lineWidth = 1.5;
+        orbitalCtx.lineWidth = 2.0;
 
-        // Draw 5 parallel lines
-        for (let i = -2; i <= 2; i++) {
-            const offset = i * 14;
+        // Draw 7 parallel lines, stopping outside moon's orbit (r=70)
+        for (let i = -3; i <= 3; i++) {
+            const offset = i * 11;
             const perpX = -sunDy * offset;
             const perpY = sunDx * offset;
             const x1 = cx + sunDx * 98 + perpX;
             const y1 = cy + sunDy * 98 + perpY;
-            const x2 = cx + sunDx * 55 + perpX;
-            const y2 = cy + sunDy * 55 + perpY;
+            const x2 = cx + sunDx * 76 + perpX;
+            const y2 = cy + sunDy * 76 + perpY;
             orbitalCtx.beginPath();
             orbitalCtx.moveTo(x1, y1); orbitalCtx.lineTo(x2, y2);
             orbitalCtx.stroke();
 
-            // Draw arrowhead on the center line
-            if (i === 0) {
-                orbitalCtx.beginPath();
-                orbitalCtx.moveTo(x2, y2);
-                orbitalCtx.lineTo(x2 + sunDx * 6 - sunDy * 4, y2 + sunDy * 6 + sunDx * 4);
-                orbitalCtx.lineTo(x2 + sunDx * 6 + sunDy * 4, y2 + sunDy * 6 - sunDx * 4);
-                orbitalCtx.fillStyle = 'rgba(255,220,80,0.7)';
-                orbitalCtx.fill();
-            }
+            // Draw arrowhead on all lines
+            orbitalCtx.beginPath();
+            orbitalCtx.moveTo(x2, y2);
+            orbitalCtx.lineTo(x2 + sunDx * 5 - sunDy * 3.5, y2 + sunDy * 5 + sunDx * 3.5);
+            orbitalCtx.lineTo(x2 + sunDx * 5 + sunDy * 3.5, y2 + sunDy * 5 - sunDx * 3.5);
+            orbitalCtx.fillStyle = 'rgba(255,220,80,0.7)';
+            orbitalCtx.fill();
         }
         orbitalCtx.restore();
 
         // "Sun" label at the base of the center ray
-        const sunLabelX = cx + sunDx * 85;
-        const sunLabelY = cy + sunDy * 85;
+        const sunLabelX = cx + sunDx * 87;
+        const sunLabelY = cy + sunDy * 87;
         orbitalCtx.font = '10px Patrick Hand';
         orbitalCtx.fillStyle = 'rgba(255,220,80,0.9)';
         orbitalCtx.textAlign = 'center';
