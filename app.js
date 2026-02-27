@@ -1,5 +1,5 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.5.5)
+   Earthview from the Moon — Canvas Renderer  (v0.5.6)
    ============================================================
    Changes from v0.4.0:
    - Mission Control side-panel dashboard
@@ -281,6 +281,7 @@
        ========================================================== */
 
     const LOCATION_PRESETS = {
+        guanghan: { lat: 33, lon: -43, label: '广寒开发区 (Guanghan)' },
         tranquility: { lat: 8, lon: 31, label: 'Sea of Tranquility' },
         procellarum: { lat: 18, lon: -57, label: 'Oceanus Procellarum' },
         southpole: { lat: -90, lon: 0, label: 'Lunar South Pole' },
@@ -1047,7 +1048,7 @@
     });
 
     // Initialize from default preset
-    setPreset('tranquility');
+    setPreset('guanghan');
 
     /* ==========================================================
        MAIN LOOP

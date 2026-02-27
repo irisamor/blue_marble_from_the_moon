@@ -16,6 +16,16 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.5.6] — 2026-02-27
+
+### 📍 Guanghan Observer Default
+
+### Added (Patch)
+- **New Observer Preset**: Added "广寒开发区 (Guanghan)" at latitude 33°N, longitude 43°W as a selectable observer location in the Mission Control panel. 
+- **Default Location**: Set Guanghan as the default observer location on application load.
+
+---
+
 ## [0.5.5] — 2026-02-27
 
 ### 🚑 Engine Crash Hotfix
