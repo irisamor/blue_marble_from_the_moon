@@ -1,5 +1,5 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v0.5.4)
+   Earthview from the Moon — Canvas Renderer  (v0.5.5)
    ============================================================
    Changes from v0.4.0:
    - Mission Control side-panel dashboard
@@ -68,9 +68,8 @@
        EARTH IMAGE — equirectangular map for full-globe scroll
        ========================================================== */
     const earthImg = new Image();
-    earthImg.src = 'earth-blue-marble.jpg';
     const earthNightImg = new Image();
-    earthNightImg.src = 'earth-lights.png';
+
     let earthImgLoaded = false;
     let earthCanvas = null;
     let earthNightCanvas = null;
@@ -83,7 +82,6 @@
     let sphereMap = null; // { u, v } lookup array
     const SPHERE_SIZE = 512;
     const SPHERE_R = SPHERE_SIZE / 2;
-
     let loadedCount = 0;
     const checkLoad = () => {
         loadedCount++;
@@ -91,6 +89,9 @@
     };
     earthImg.onload = checkLoad;
     earthNightImg.onload = checkLoad;
+
+    earthImg.src = 'earth-blue-marble.jpg';
+    earthNightImg.src = 'earth-lights.png';
 
     function initSphereAndCanvases() {
         const w = earthImg.naturalWidth;
@@ -539,7 +540,7 @@
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.fill();
 
-        drawPhaseShadowInClip(cx, cy, r, phaseDeg, tiltDeg);
+        drawPhaseShadowInClip(cx, cy, r, phaseDeg, tiltDeg, axisTiltDeg);
 
         ctx.restore();
 
@@ -551,7 +552,7 @@
         ctx.stroke();
     }
 
-    function drawPhaseShadowInClip(cx, cy, r, phaseDeg, tiltDeg) {
+    function drawPhaseShadowInClip(cx, cy, r, phaseDeg, tiltDeg, axisTiltDeg) {
         const d = ((phaseDeg % 360) + 360) % 360;
         const phaseAngle = Math.PI - (d / 180) * Math.PI;
         const terminatorW = Math.abs(Math.cos(phaseAngle)) * r;

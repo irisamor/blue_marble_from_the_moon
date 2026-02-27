@@ -16,6 +16,15 @@ _Nothing unreleased at this time._
 
 ---
 
+## [0.5.5] — 2026-02-27
+
+### 🚑 Engine Crash Hotfix
+
+### Fixed (Patch)
+- **Render loop crash**: Fixed a critical `ReferenceError` regarding `axisTiltDeg` scoping introduced in v0.5.4, which caused the main `requestAnimationFrame` loop to immediately crash. This crash had completely frozen the dashboard controls and prevented both city lights and the lunar foreground from rendering.
+
+---
+
 ## [0.5.4] — 2026-02-27
 
 ### 🏙️ City Lights on the Night Side
