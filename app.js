@@ -1,10 +1,11 @@
 /* ============================================================
-   Earthview from the Moon — Canvas Renderer  (v2)
+   Earthview from the Moon — Canvas Renderer  (v0.2.0)
    ============================================================
-   Fixes:
-   - Continent shapes replaced with hand-traced bézier paths
-     that actually resemble Africa, Americas, Eurasia, etc.
-   - Phase shadow fully covers Earth at 0° (New Earth).
+   Changes from v0.1.0:
+   - Earth drawn from earth-sketch.jpg image (rotated per date)
+   - Astronomically accurate X/Y positioning per Moon location
+   - Tilted terminator (shadow angle matches Sun-Earth geometry)
+   - Flight Director time-lapse with date pickers + play/pause
    ============================================================ */
 
 (function () {
@@ -13,47 +14,69 @@
     /* --- DOM refs --- */
     const canvas = document.getElementById('scene');
     const ctx = canvas.getContext('2d');
-    const slider = document.getElementById('phase-slider');
-    const phaseLbl = document.getElementById('phase-name');
     const locSel = document.getElementById('location-select');
+    const startIn = document.getElementById('start-date');
+    const endIn = document.getElementById('end-date');
+    const playBtn = document.getElementById('play-btn');
+    const speedSel = document.getElementById('speed-select');
 
     /* --- Palette --- */
     const C = {
         skyBlack: '#0B0E14',
         starWhite: '#FFFDE7',
         oceanBlue: '#5DADE2',
-        oceanDeep: '#3B8DBF',
-        landGreen: '#B8D430',
-        landDark: '#8DAF18',
         outline: '#2C3E50',
         groundWarm: '#D4905C',
         groundDeep: '#C47A3A',
         shadow: 'rgba(10, 12, 20, 0.88)',
-        highlight: 'rgba(255, 255, 240, 0.25)',
     };
+
+    /* ==========================================================
+       ASTRONOMICAL CONSTANTS
+       ========================================================== */
+
+    // Reference New Moon (UTC): 2025-01-29T12:36:00Z
+    const REF_NEW_MOON = new Date('2025-01-29T12:36:00Z').getTime();
+
+    // Synodic month (Earth phase cycle as seen from Moon) ≈ 29.53059 days
+    const SYNODIC_DAYS = 29.53059;
+
+    // Earth's sidereal rotation period ≈ 23h 56m 4s = 0.99727 days
+    const SIDEREAL_DAY = 0.99726968;
+
+    // Obliquity of Earth's axis ≈ 23.44° (affects terminator tilt)
+    const OBLIQUITY = 23.44;
+
+    /* ==========================================================
+       EARTH IMAGE
+       ========================================================== */
+    const earthImg = new Image();
+    earthImg.src = 'earth-sketch.jpg';
+    let earthImgLoaded = false;
+    earthImg.onload = () => { earthImgLoaded = true; };
 
     /* ==========================================================
        STARS
        ========================================================== */
     let stars = [];
-    function generateStars(count) {
+    function genStars(n) {
         stars = [];
-        for (let i = 0; i < count; i++) {
+        for (let i = 0; i < n; i++) {
             stars.push({
                 x: Math.random(), y: Math.random(),
                 r: 0.5 + Math.random() * 2,
-                baseAlpha: 0.4 + Math.random() * 0.6,
+                alpha: 0.4 + Math.random() * 0.6,
                 speed: 0.5 + Math.random() * 2,
-                offset: Math.random() * Math.PI * 2,
+                off: Math.random() * Math.PI * 2,
             });
         }
     }
-    generateStars(220);
+    genStars(220);
 
     function drawStars(w, h, time) {
         for (const s of stars) {
-            const tw = 0.5 + 0.5 * Math.sin(time * s.speed + s.offset);
-            const a = s.baseAlpha * (0.6 + 0.4 * tw);
+            const tw = 0.5 + 0.5 * Math.sin(time * s.speed + s.off);
+            const a = s.alpha * (0.6 + 0.4 * tw);
             ctx.beginPath();
             ctx.arc(s.x * w, s.y * h * 0.78, s.r, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255,253,231,${a.toFixed(2)})`;
@@ -62,16 +85,29 @@
     }
 
     /* ==========================================================
-       LOCATION PRESETS
+       LOCATION PRESETS  (astronomically derived)
+       ==========================================================
+       Selenographic coords → angular distance from sub-Earth
+       point → elevation / azimuth → canvas X/Y.
+  
+       Sub-Earth point ≈ 0°N, 0°E.
+       Elevation = 90° − angular_distance.
+       Azimuth maps to horizontal position.
+  
+       Location               Coords        Dist  Elev  Az     X%   Y%   Scale
+       Sea of Tranquility     8°N, 31°E     ~32°  58°   West   38   25   1.0
+       Oceanus Procellarum    18°N, 57°W    ~60°  30°   East   72   50   0.92
+       Lunar South Pole       90°S, 0°      ~84°   6°   North  50   68   0.82
+       Far Side (Moscoviense) 27°N, 148°E   ~150° <0°   —      —    —    0
        ========================================================== */
     const LOCATIONS = {
-        procellarum: { yRatio: 0.30, scale: 1.0 },
-        tranquility: { yRatio: 0.35, scale: 0.95 },
-        southpole: { yRatio: 0.58, scale: 0.85 },
-        farside: { yRatio: -1, scale: 0 },
+        tranquility: { xRatio: 0.38, yRatio: 0.25, scale: 1.0 },
+        procellarum: { xRatio: 0.72, yRatio: 0.50, scale: 0.92 },
+        southpole: { xRatio: 0.50, yRatio: 0.68, scale: 0.82 },
+        farside: { xRatio: 0.50, yRatio: -1, scale: 0 },
     };
 
-    let current = { yRatio: 0.30, scale: 1.0 };
+    let current = { xRatio: 0.38, yRatio: 0.25, scale: 1.0 };
     let target = { ...current };
     const LERP = 0.045;
     function lerp(a, b, t) { return a + (b - a) * t; }
@@ -92,6 +128,66 @@
     }
 
     /* ==========================================================
+       DATE ↔ PHASE ASTRONOMY
+       ========================================================== */
+
+    /** Phase angle (0–360°) for a given JS Date.
+     *  0° = New Earth (fully shadowed), 180° = Full Earth. */
+    function phaseForDate(date) {
+        const ms = date.getTime() - REF_NEW_MOON;
+        const days = ms / 86400000;
+        return ((days / SYNODIC_DAYS) * 360 % 360 + 360) % 360;
+    }
+
+    /** Earth rotation angle (degrees) for a given JS Date.
+     *  This drives the image rotation so continents spin. */
+    function rotationForDate(date) {
+        const ms = date.getTime() - REF_NEW_MOON;
+        const days = ms / 86400000;
+        return ((days / SIDEREAL_DAY) * 360) % 360;
+    }
+
+    /**
+     * Terminator tilt angle (degrees) as seen from the Moon.
+     *
+     * The terminator on Earth is perpendicular to the Sun–Earth line.
+     * From the Moon, the apparent tilt of this line against the
+     * "local vertical" depends on:
+     *   1. The ecliptic longitude of the Sun (seasonal component).
+     *   2. The Moon's orbital inclination to the ecliptic (~5.14°).
+     *
+     * The dominant effect is the solar ecliptic latitude projected
+     * onto the Moon's sky. The Sun's ecliptic longitude advances
+     * ~0.9856°/day from the vernal equinox (≈ March 20).
+     *
+     * Simplified model:
+     *   tilt ≈ OBLIQUITY × sin(sunEclipticLon) × cos(moonPhaseAngle)
+     *
+     * This produces a tilt that:
+     *   - Varies seasonally (max at solstices, zero at equinoxes)
+     *   - Varies within each lunation (max at quarters, zero at
+     *     new/full — mirrors what we see of the Moon from Earth)
+     */
+    function terminatorTiltForDate(date) {
+        const dayOfYear = (date - new Date(date.getFullYear(), 0, 0)) / 86400000;
+        // Sun's ecliptic longitude (approx), 0 at vernal equinox (~day 79)
+        const sunLon = ((dayOfYear - 79) / 365.25) * 360;
+        const sunLonRad = (sunLon * Math.PI) / 180;
+
+        // Seasonal component
+        const seasonal = OBLIQUITY * Math.sin(sunLonRad);
+
+        // Phase-dependent component (tilt strongest at quarters)
+        const phase = phaseForDate(date);
+        const phaseRad = (phase * Math.PI) / 180;
+        const phaseMod = Math.sin(phaseRad);   // ±1 at quarters, 0 at new/full
+
+        // Combined tilt (capped for visual clarity)
+        const tilt = seasonal * phaseMod * 0.6;
+        return tilt;   // degrees
+    }
+
+    /* ==========================================================
        RESIZE
        ========================================================== */
     function resize() {
@@ -105,105 +201,15 @@
     resize();
 
     /* ==========================================================
-       CONTINENT DATA  (normalised coords, -1…+1, centered on 0,0)
-       Each continent is an array of {x,y} control-point sets that
-       get drawn as a closed bezier shape.  Longitude (x) rotates;
-       latitude (y) stays fixed.
+       DRAW EARTH  (image-based)
        ========================================================== */
 
-    // Helper: define a continent as an array of points
-    // These are authored in a mercator-ish coordinate space:
-    //   x: -1 (180°W) … +1 (180°E)     y: -1 (90°N) … +1 (90°S)
-    const RAW_CONTINENTS = [
-        {
-            name: 'africa', color: C.landGreen, points: [
-                // Rough outline of Africa
-                { x: 0.02, y: -0.15 }, { x: 0.12, y: -0.22 }, { x: 0.15, y: -0.08 },
-                { x: 0.18, y: 0.05 }, { x: 0.22, y: 0.15 }, { x: 0.20, y: 0.30 },
-                { x: 0.15, y: 0.42 }, { x: 0.10, y: 0.45 }, { x: 0.05, y: 0.38 },
-                { x: -0.02, y: 0.25 }, { x: -0.05, y: 0.10 }, { x: -0.05, y: -0.05 },
-            ]
-        },
-        {
-            name: 'europe', color: C.landGreen, points: [
-                { x: -0.02, y: -0.52 }, { x: 0.06, y: -0.55 }, { x: 0.15, y: -0.50 },
-                { x: 0.22, y: -0.42 }, { x: 0.18, y: -0.35 }, { x: 0.12, y: -0.30 },
-                { x: 0.05, y: -0.28 }, { x: -0.03, y: -0.30 }, { x: -0.06, y: -0.38 },
-                { x: -0.05, y: -0.48 },
-            ]
-        },
-        {
-            name: 'asia', color: C.landGreen, points: [
-                { x: 0.22, y: -0.55 }, { x: 0.35, y: -0.60 }, { x: 0.50, y: -0.55 },
-                { x: 0.62, y: -0.45 }, { x: 0.68, y: -0.30 }, { x: 0.65, y: -0.15 },
-                { x: 0.55, y: -0.05 }, { x: 0.42, y: 0.00 }, { x: 0.30, y: -0.05 },
-                { x: 0.22, y: -0.15 }, { x: 0.18, y: -0.30 }, { x: 0.20, y: -0.42 },
-            ]
-        },
-        {
-            name: 'northAmerica', color: C.landGreen, points: [
-                { x: -0.60, y: -0.62 }, { x: -0.50, y: -0.68 }, { x: -0.38, y: -0.60 },
-                { x: -0.30, y: -0.48 }, { x: -0.28, y: -0.35 }, { x: -0.32, y: -0.25 },
-                { x: -0.40, y: -0.22 }, { x: -0.48, y: -0.28 }, { x: -0.55, y: -0.35 },
-                { x: -0.62, y: -0.45 }, { x: -0.65, y: -0.55 },
-            ]
-        },
-        {
-            name: 'southAmerica', color: C.landGreen, points: [
-                { x: -0.32, y: -0.05 }, { x: -0.25, y: -0.12 }, { x: -0.18, y: -0.05 },
-                { x: -0.15, y: 0.10 }, { x: -0.18, y: 0.28 }, { x: -0.22, y: 0.42 },
-                { x: -0.28, y: 0.50 }, { x: -0.35, y: 0.45 }, { x: -0.38, y: 0.32 },
-                { x: -0.36, y: 0.18 }, { x: -0.35, y: 0.05 },
-            ]
-        },
-        {
-            name: 'australia', color: C.landGreen, points: [
-                { x: 0.58, y: 0.18 }, { x: 0.65, y: 0.15 }, { x: 0.72, y: 0.20 },
-                { x: 0.74, y: 0.30 }, { x: 0.70, y: 0.38 }, { x: 0.62, y: 0.35 },
-                { x: 0.56, y: 0.28 },
-            ]
-        },
-    ];
-
-    /**
-     * Project a continent point onto the visible sphere.
-     * @param {number} px  normalised longitude (-1…+1)
-     * @param {number} py  normalised latitude  (-1…+1)
-     * @param {number} rot rotation angle in radians (from slider)
-     * @param {number} r   sphere radius in pixels
-     * @returns {{x,y,visible}} canvas-relative coords + depth flag
-     */
-    function projectPoint(px, py, rot, r) {
-        // Convert normalised coords to spherical angles
-        const lon = px * Math.PI;          // -π … +π
-        const lat = py * (Math.PI / 2);    // -π/2 … +π/2
-
-        // 3D position on unit sphere
-        const cosLat = Math.cos(lat);
-        const sx = cosLat * Math.sin(lon + rot);
-        const sy = Math.sin(lat);
-        const sz = cosLat * Math.cos(lon + rot);
-
-        // sz > 0  →  facing us
-        return {
-            x: sx * r,
-            y: sy * r,
-            visible: sz > -0.05,   // slight tolerance
-            depth: sz,
-        };
-    }
-
-    /* ==========================================================
-       DRAW EARTH
-       ========================================================== */
-
-    /** Wobbly outline for hand-drawn feel */
-    function wobbleCircle(cx, cy, r, segments, wobble) {
+    /** Wobbly circle outline */
+    function wobbleCircle(cx, cy, r, segs, w) {
         ctx.beginPath();
-        for (let i = 0; i <= segments; i++) {
-            const a = (i / segments) * Math.PI * 2;
-            const wr = r + Math.sin(a * 7.3 + 1.2) * wobble
-                + Math.cos(a * 13.1) * wobble * 0.6;
+        for (let i = 0; i <= segs; i++) {
+            const a = (i / segs) * Math.PI * 2;
+            const wr = r + Math.sin(a * 7.3 + 1.2) * w + Math.cos(a * 13.1) * w * 0.6;
             const x = cx + Math.cos(a) * wr;
             const y = cy + Math.sin(a) * wr;
             if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
@@ -211,53 +217,22 @@
         ctx.closePath();
     }
 
-    function drawEarth(cx, cy, r, phaseDeg) {
-        const rot = (phaseDeg / 180) * Math.PI;  // slider drives rotation
+    function drawEarth(cx, cy, r, phaseDeg, rotDeg, tiltDeg) {
+        if (!earthImgLoaded) return;
 
-        /* --- Ocean base --- */
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        const og = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.2, r * 0.1, cx, cy, r);
-        og.addColorStop(0, '#7EC8E3');
-        og.addColorStop(0.5, C.oceanBlue);
-        og.addColorStop(1, C.oceanDeep);
-        ctx.fillStyle = og;
-        ctx.fill();
-        ctx.restore();
-
-        /* --- Continents --- */
+        /* --- Draw image inside circular clip, rotated --- */
         ctx.save();
         ctx.beginPath();
         ctx.arc(cx, cy, r - 1, 0, Math.PI * 2);
         ctx.clip();
 
-        for (const cont of RAW_CONTINENTS) {
-            // Project all points
-            const pts = cont.points.map(p => projectPoint(p.x, p.y, rot, r));
-            // Skip if majority behind sphere
-            const visCnt = pts.filter(p => p.visible).length;
-            if (visCnt < pts.length * 0.3) continue;
+        ctx.translate(cx, cy);
+        ctx.rotate((rotDeg * Math.PI) / 180);
 
-            ctx.beginPath();
-            // Use quadratic curves through projected points for smooth shapes
-            const first = pts[0];
-            ctx.moveTo(cx + first.x, cy + first.y);
-            for (let i = 0; i < pts.length; i++) {
-                const p0 = pts[i];
-                const p1 = pts[(i + 1) % pts.length];
-                const mx = (cx + p0.x + cx + p1.x) / 2;
-                const my = (cy + p0.y + cy + p1.y) / 2;
-                ctx.quadraticCurveTo(cx + p0.x, cy + p0.y, mx, my);
-            }
-            ctx.closePath();
-            ctx.fillStyle = cont.color;
-            ctx.fill();
-            // Continent outline
-            ctx.strokeStyle = C.landDark;
-            ctx.lineWidth = 1.2;
-            ctx.stroke();
-        }
+        // Scale image to cover the circle
+        const imgSize = r * 2.2;
+        ctx.drawImage(earthImg, -imgSize / 2, -imgSize / 2, imgSize, imgSize);
+
         ctx.restore();
 
         /* --- Specular highlight --- */
@@ -269,14 +244,14 @@
             cx - r * 0.28, cy - r * 0.28, r * 0.02,
             cx - r * 0.1, cy - r * 0.1, r * 0.55
         );
-        hg.addColorStop(0, 'rgba(255,255,255,0.38)');
+        hg.addColorStop(0, 'rgba(255,255,255,0.25)');
         hg.addColorStop(1, 'rgba(255,255,255,0)');
         ctx.fillStyle = hg;
         ctx.fill();
         ctx.restore();
 
-        /* --- Phase shadow (terminator) --- */
-        drawPhaseShadow(cx, cy, r, phaseDeg);
+        /* --- Phase shadow with tilt --- */
+        drawPhaseShadow(cx, cy, r, phaseDeg, tiltDeg);
 
         /* --- Wobbly outline --- */
         wobbleCircle(cx, cy, r, 90, r * 0.012);
@@ -286,162 +261,117 @@
     }
 
     /**
-     * Draw the phase terminator shadow.
-     * phaseDeg 0 = New Earth (fully dark), 180 = Full Earth (fully lit).
+     * Phase terminator shadow, now with tilt rotation.
+     * phaseDeg 0 = New Earth (full shadow), 180 = Full (no shadow).
+     * tiltDeg = rotation of the terminator line.
      */
-    function drawPhaseShadow(cx, cy, r, phaseDeg) {
-        // Normalise to 0…360
+    function drawPhaseShadow(cx, cy, r, phaseDeg, tiltDeg) {
         const d = ((phaseDeg % 360) + 360) % 360;
-        // Map to radians: 0 → π, 180 → 0, 360 → π
-        const phaseAngle = Math.PI - (d / 180) * Math.PI;   // π at d=0, 0 at d=180
+        const phaseAngle = Math.PI - (d / 180) * Math.PI;
+        const terminatorW = Math.abs(Math.cos(phaseAngle)) * r;
 
         ctx.save();
-        // Clip to Earth circle
+        // Clip to Earth
         ctx.beginPath();
         ctx.arc(cx, cy, r + 1, 0, Math.PI * 2);
         ctx.clip();
 
-        // The shadow is drawn as:
-        //   Half-circle (always dark) + elliptical terminator
-        //   Direction flips at d=180
-
-        const terminatorWidth = Math.abs(Math.cos(phaseAngle)) * r;
+        // Apply tilt rotation around Earth centre
+        ctx.translate(cx, cy);
+        ctx.rotate((tiltDeg * Math.PI) / 180);
+        ctx.translate(-cx, -cy);
 
         ctx.beginPath();
-
         if (d <= 180) {
-            // Shadow on right side, shrinking toward d=180
-            // Right semicircle
+            // Shadow on right, shrinking toward Full
             ctx.arc(cx, cy, r + 2, -Math.PI / 2, Math.PI / 2, false);
-            // Terminator (elliptical arc back)
-            ctx.ellipse(cx, cy, terminatorWidth, r + 2, 0,
+            ctx.ellipse(cx, cy, terminatorW, r + 2, 0,
                 Math.PI / 2, -Math.PI / 2, d > 90);
         } else {
-            // Shadow on left side, growing past d=180
-            // Left semicircle
+            // Shadow on left, growing past Full
             ctx.arc(cx, cy, r + 2, Math.PI / 2, -Math.PI / 2, false);
-            // Terminator back
-            ctx.ellipse(cx, cy, terminatorWidth, r + 2, 0,
+            ctx.ellipse(cx, cy, terminatorW, r + 2, 0,
                 -Math.PI / 2, Math.PI / 2, d < 270);
         }
-
         ctx.closePath();
         ctx.fillStyle = C.shadow;
         ctx.fill();
+
         ctx.restore();
     }
 
     /* ==========================================================
        LUNAR SURFACE
        ========================================================== */
-    // Pre-compute the bumpy horizon so it's stable across frames
-    const HORIZON_SEGMENTS = 80;
-    let horizonBumps = [];
-    function genHorizonBumps() {
-        horizonBumps = [];
-        for (let i = 0; i <= HORIZON_SEGMENTS; i++) {
-            horizonBumps.push(
+    const HSEG = 80;
+    let hBumps = [];
+    (function genBumps() {
+        for (let i = 0; i <= HSEG; i++) {
+            hBumps.push(
                 Math.sin(i * 0.35) * 8 +
                 Math.sin(i * 0.7 + 1) * 5 +
                 Math.sin(i * 1.8 + 3) * 3
             );
         }
-    }
-    genHorizonBumps();
+    })();
 
-    // Pre-compute scribble lines so they're stable
-    let scribbleH = [];
-    let scribbleD = [];
-    function genScribbles() {
-        scribbleH = [];
-        scribbleD = [];
+    let scribH = [], scribD = [];
+    (function genScrib() {
         for (let i = 0; i < 22; i++) {
             const segs = [];
-            const startX = Math.random() * 0.3;
-            const endX = startX + 0.1 + Math.random() * 0.5;
+            const sx = Math.random() * 0.3;
+            const ex = sx + 0.1 + Math.random() * 0.5;
             for (let j = 0; j <= 8; j++) {
-                segs.push({
-                    xr: startX + ((endX - startX) / 8) * j,
-                    yr: (Math.random() - 0.5) * 3,
-                });
+                segs.push({ xr: sx + ((ex - sx) / 8) * j, yr: (Math.random() - 0.5) * 3 });
             }
-            scribbleH.push({ yOff: 8 + i * 6 + Math.random() * 3, segs });
+            scribH.push({ yOff: 8 + i * 6 + Math.random() * 3, segs });
         }
         for (let i = 0; i < 50; i++) {
             const len = 6 + Math.random() * 14;
-            const angle = -0.5 + Math.random() * 0.4;
-            scribbleD.push({
+            const ang = -0.5 + Math.random() * 0.4;
+            scribD.push({
                 xr: Math.random(), yr: Math.random(),
-                dx: Math.cos(angle) * len,
-                dy: Math.sin(angle) * len,
+                dx: Math.cos(ang) * len, dy: Math.sin(ang) * len
             });
         }
-    }
-    genScribbles();
+    })();
 
     function drawLunarSurface(w, h) {
-        const horizonY = h * 0.78;
+        const hy = h * 0.78;
 
-        /* --- Ground fill --- */
         ctx.save();
         ctx.beginPath();
-        ctx.moveTo(0, horizonY);
-        for (let i = 0; i <= HORIZON_SEGMENTS; i++) {
-            ctx.lineTo((i / HORIZON_SEGMENTS) * w, horizonY + horizonBumps[i]);
-        }
-        ctx.lineTo(w, h); ctx.lineTo(0, h);
-        ctx.closePath();
-        const gg = ctx.createLinearGradient(0, horizonY, 0, h);
-        gg.addColorStop(0, C.groundWarm);
-        gg.addColorStop(0.4, C.groundDeep);
+        ctx.moveTo(0, hy);
+        for (let i = 0; i <= HSEG; i++) ctx.lineTo((i / HSEG) * w, hy + hBumps[i]);
+        ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+        const gg = ctx.createLinearGradient(0, hy, 0, h);
+        gg.addColorStop(0, C.groundWarm); gg.addColorStop(0.4, C.groundDeep);
         gg.addColorStop(1, '#A0643A');
-        ctx.fillStyle = gg;
-        ctx.fill();
+        ctx.fillStyle = gg; ctx.fill();
         ctx.restore();
 
-        /* --- Cross-hatch texture --- */
         ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, horizonY - 4, w, h - horizonY + 4);
-        ctx.clip();
-
-        // Horizontal scribbles
-        ctx.strokeStyle = 'rgba(160,90,40,0.30)';
-        ctx.lineWidth = 1.2;
-        for (const s of scribbleH) {
+        ctx.beginPath(); ctx.rect(0, hy - 4, w, h - hy + 4); ctx.clip();
+        ctx.strokeStyle = 'rgba(160,90,40,0.30)'; ctx.lineWidth = 1.2;
+        for (const s of scribH) {
             ctx.beginPath();
             for (let j = 0; j < s.segs.length; j++) {
-                const px = s.segs[j].xr * w;
-                const py = horizonY + s.yOff + s.segs[j].yr;
+                const px = s.segs[j].xr * w, py = hy + s.yOff + s.segs[j].yr;
                 if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
             }
             ctx.stroke();
         }
-
-        // Diagonal hatches
-        ctx.strokeStyle = 'rgba(195,120,60,0.18)';
-        ctx.lineWidth = 1;
-        const groundH = h - horizonY;
-        for (const d of scribbleD) {
-            const x = d.xr * w;
-            const y = horizonY + 8 + d.yr * (groundH - 12);
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.lineTo(x + d.dx, y + d.dy);
-            ctx.stroke();
+        ctx.strokeStyle = 'rgba(195,120,60,0.18)'; ctx.lineWidth = 1;
+        const gH = h - hy;
+        for (const d of scribD) {
+            const x = d.xr * w, y = hy + 8 + d.yr * (gH - 12);
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + d.dx, y + d.dy); ctx.stroke();
         }
         ctx.restore();
 
-        /* --- Horizon outline --- */
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(0, horizonY);
-        for (let i = 0; i <= HORIZON_SEGMENTS; i++) {
-            ctx.lineTo((i / HORIZON_SEGMENTS) * w, horizonY + horizonBumps[i]);
-        }
-        ctx.strokeStyle = C.outline;
-        ctx.lineWidth = 2.5;
-        ctx.stroke();
+        ctx.save(); ctx.beginPath(); ctx.moveTo(0, hy);
+        for (let i = 0; i <= HSEG; i++) ctx.lineTo((i / HSEG) * w, hy + hBumps[i]);
+        ctx.strokeStyle = C.outline; ctx.lineWidth = 2.5; ctx.stroke();
         ctx.restore();
     }
 
@@ -450,17 +380,102 @@
        ========================================================== */
     function drawFarSideMsg(w, h, time) {
         ctx.save();
-        ctx.font = '28px Patrick Hand';
-        ctx.fillStyle = C.starWhite;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.font = '28px Patrick Hand'; ctx.fillStyle = C.starWhite;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.globalAlpha = 0.65 + 0.15 * Math.sin(time * 1.2);
         ctx.fillText('🌑  Earth is below the horizon here…', w / 2, h * 0.38);
-        ctx.font = '18px Patrick Hand';
-        ctx.globalAlpha = 0.45;
+        ctx.font = '18px Patrick Hand'; ctx.globalAlpha = 0.45;
         ctx.fillText("You're on the Moon's far side!", w / 2, h * 0.44);
         ctx.restore();
     }
+
+    /* ==========================================================
+       ON-CANVAS DATE COUNTER
+       ========================================================== */
+    function drawDateLabel(w, h, date, phase) {
+        if (!date) return;
+        const dateStr = date.toLocaleDateString('en-US', {
+            year: 'numeric', month: 'short', day: 'numeric',
+        });
+        const phaseStr = phaseName(phase);
+
+        ctx.save();
+        ctx.font = '20px Patrick Hand';
+        ctx.fillStyle = 'rgba(255,253,231,0.75)';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(dateStr, 20, h * 0.78 - 14);
+        ctx.font = '15px Patrick Hand';
+        ctx.fillStyle = 'rgba(255,253,231,0.50)';
+        ctx.fillText(phaseStr, 20, h * 0.78 + 2);
+        ctx.restore();
+    }
+
+    /* ==========================================================
+       TIME-LAPSE ENGINE
+       ========================================================== */
+    let isPlaying = false;
+    let currentDate = new Date();   // the "virtual" date for rendering
+    let lapseStart = null;         // Date object
+    let lapseEnd = null;
+    let lapseTimer = null;
+
+    // Set default date inputs (today ± 14 days)
+    const today = new Date();
+    const d14ago = new Date(today); d14ago.setDate(d14ago.getDate() - 14);
+    const d14fwd = new Date(today); d14fwd.setDate(d14fwd.getDate() + 14);
+    startIn.value = isoDate(d14ago);
+    endIn.value = isoDate(d14fwd);
+
+    function isoDate(d) {
+        return d.getFullYear() + '-' +
+            String(d.getMonth() + 1).padStart(2, '0') + '-' +
+            String(d.getDate()).padStart(2, '0');
+    }
+
+    function startLapse() {
+        lapseStart = new Date(startIn.value + 'T00:00:00');
+        lapseEnd = new Date(endIn.value + 'T23:59:59');
+        if (isNaN(lapseStart) || isNaN(lapseEnd) || lapseEnd <= lapseStart) return;
+
+        currentDate = new Date(lapseStart);
+        isPlaying = true;
+        playBtn.textContent = '⏸ Pause';
+        playBtn.classList.add('playing');
+
+        const speed = parseInt(speedSel.value, 10);  // days per second
+        const tickMs = 50;                            // ~20 fps for the counter
+        const daysPerTick = speed * (tickMs / 1000);
+
+        clearInterval(lapseTimer);
+        lapseTimer = setInterval(() => {
+            currentDate = new Date(currentDate.getTime() + daysPerTick * 86400000);
+            if (currentDate >= lapseEnd) {
+                currentDate = new Date(lapseEnd);
+                stopLapse();
+            }
+        }, tickMs);
+    }
+
+    function stopLapse() {
+        isPlaying = false;
+        clearInterval(lapseTimer);
+        playBtn.textContent = '▶ Play Time-Lapse';
+        playBtn.classList.remove('playing');
+    }
+
+    playBtn.addEventListener('click', () => {
+        if (isPlaying) stopLapse(); else startLapse();
+    });
+
+    locSel.addEventListener('change', () => {
+        const loc = LOCATIONS[locSel.value];
+        if (loc) {
+            target.xRatio = loc.xRatio;
+            target.yRatio = loc.yRatio;
+            target.scale = loc.scale;
+        }
+    });
 
     /* ==========================================================
        MAIN LOOP
@@ -471,28 +486,34 @@
         const w = rect.width, h = rect.height;
 
         ctx.clearRect(0, 0, w, h);
-
-        // Sky
         ctx.fillStyle = C.skyBlack;
         ctx.fillRect(0, 0, w, h);
 
-        // Stars
         drawStars(w, h, time);
 
         // Lerp position
+        current.xRatio = lerp(current.xRatio, target.xRatio, LERP);
         current.yRatio = lerp(current.yRatio, target.yRatio, LERP);
         current.scale = lerp(current.scale, target.scale, LERP);
 
-        // Earth
-        const phaseDeg = parseFloat(slider.value);
+        // Determine current date for astronomy
+        const renderDate = isPlaying ? currentDate : new Date();
+
+        // Compute astronomy
+        const phaseDeg = phaseForDate(renderDate);
+        const rotDeg = rotationForDate(renderDate);
+        const tiltDeg = terminatorTiltForDate(renderDate);
+
+        // Earth position
         const earthR = Math.min(w, h) * 0.14 * current.scale;
-        const earthX = w * 0.5;
+        const earthX = w * current.xRatio;
         const earthY = h * current.yRatio;
 
         if (target.yRatio >= 0 && current.scale > 0.05) {
-            // Subtle glow (behind Earth)
+            // Subtle glow
             ctx.save();
-            const glow = ctx.createRadialGradient(earthX, earthY, earthR * 0.9, earthX, earthY, earthR * 1.8);
+            const glow = ctx.createRadialGradient(earthX, earthY, earthR * 0.9,
+                earthX, earthY, earthR * 1.8);
             glow.addColorStop(0, 'rgba(93,173,226,0.10)');
             glow.addColorStop(1, 'rgba(93,173,226,0)');
             ctx.fillStyle = glow;
@@ -501,30 +522,20 @@
             ctx.fill();
             ctx.restore();
 
-            drawEarth(earthX, earthY, earthR, phaseDeg);
+            drawEarth(earthX, earthY, earthR, phaseDeg, rotDeg, tiltDeg);
         } else {
             drawFarSideMsg(w, h, time);
         }
 
-        // Lunar surface (always on top)
         drawLunarSurface(w, h);
 
-        // Phase label
-        phaseLbl.textContent = phaseName(phaseDeg);
+        // On-canvas date + phase label
+        if (target.yRatio >= 0) {
+            drawDateLabel(w, h, renderDate, phaseDeg);
+        }
 
         requestAnimationFrame(draw);
     }
-
-    /* ==========================================================
-       EVENTS
-       ========================================================== */
-    locSel.addEventListener('change', () => {
-        const loc = LOCATIONS[locSel.value];
-        if (loc) {
-            target.yRatio = loc.yRatio;
-            target.scale = loc.scale;
-        }
-    });
 
     requestAnimationFrame(draw);
 })();

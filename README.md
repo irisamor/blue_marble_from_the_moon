@@ -2,7 +2,7 @@
 
 An interactive 2D visualizer that shows what the Earth looks like from the surface of the Moon — rendered in a charming, hand-drawn sketch style.
 
-![Earthview from the Moon — Full Earth](https://img.shields.io/badge/version-v1.0.0-blue?style=flat-square)
+![Earthview from the Moon — Full Earth](https://img.shields.io/badge/version-v0.2.0-blue?style=flat-square)
 ![Zero Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen?style=flat-square)
 ![Vanilla JS](https://img.shields.io/badge/built_with-vanilla_JS-yellow?style=flat-square)
 

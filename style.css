@@ -1,37 +1,36 @@
 /* ============================================================
-   Earthview from the Moon — Hand-drawn Sketch Aesthetic
+   Earthview from the Moon — Hand-drawn Sketch Aesthetic  (v0.2)
    ============================================================ */
 
 /* --- Reset & Base --- */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
 :root {
-  /* Palette from reference sketch */
-  --ocean-blue:   #5DADE2;
-  --land-green:   #B8D430;
-  --land-dark:    #A3C520;
+  --ocean-blue: #5DADE2;
+  --land-green: #B8D430;
+  --land-dark: #A3C520;
   --outline-dark: #2C3E50;
-  --ground-warm:  #D4905C;
-  --ground-deep:  #C47A3A;
-  --sky-black:    #0B0E14;
-  --star-white:   #FFFDE7;
-  --paper-bg:     #FAF7F0;
+  --ground-warm: #D4905C;
+  --ground-deep: #C47A3A;
+  --sky-black: #0B0E14;
+  --star-white: #FFFDE7;
+  --paper-bg: #FAF7F0;
   --paper-shadow: #E8E0D0;
-  --ink:          #2C3E50;
+  --ink: #2C3E50;
 
-  /* Typography */
   --font-hand: 'Patrick Hand', cursive;
-
-  /* Sketch border trick */
   --sketch-radius: 12px 4px 14px 6px;
   --sketch-radius-alt: 6px 14px 4px 12px;
 }
 
-html, body {
+html,
+body {
   height: 100%;
   overflow: hidden;
   background: var(--sky-black);
@@ -43,8 +42,7 @@ html, body {
 #scene {
   display: block;
   width: 100%;
-  /* Height = viewport minus control bar */
-  height: calc(100vh - 130px);
+  height: calc(100vh - 110px);
 }
 
 /* --- Control Panel --- */
@@ -53,34 +51,22 @@ html, body {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 130px;
+  height: 110px;
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 48px;
-  padding: 12px 32px;
+  gap: 36px;
+  padding: 10px 24px;
   background: var(--paper-bg);
-  /* Subtle paper texture via repeating gradient */
   background-image:
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 28px,
-      rgba(0,0,0,0.02) 28px,
-      rgba(0,0,0,0.02) 29px
-    ),
-    repeating-linear-gradient(
-      90deg,
-      transparent,
-      transparent 28px,
-      rgba(0,0,0,0.015) 28px,
-      rgba(0,0,0,0.015) 29px
-    );
+    repeating-linear-gradient(0deg, transparent, transparent 28px,
+      rgba(0, 0, 0, 0.02) 28px, rgba(0, 0, 0, 0.02) 29px),
+    repeating-linear-gradient(90deg, transparent, transparent 28px,
+      rgba(0, 0, 0, 0.015) 28px, rgba(0, 0, 0, 0.015) 29px);
   border-top: 3px solid var(--outline-dark);
-  /* Slight inner shadow for depth */
   box-shadow:
-    0 -4px 12px rgba(0,0,0,0.08),
-    inset 0 2px 6px rgba(0,0,0,0.04);
+    0 -4px 12px rgba(0, 0, 0, 0.08),
+    inset 0 2px 6px rgba(0, 0, 0, 0.04);
 }
 
 /* --- Control Groups --- */
@@ -88,74 +74,25 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  min-width: 200px;
+  gap: 5px;
 }
 
 .control-label {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 400;
   letter-spacing: 0.3px;
-  color: var(--ink);
   user-select: none;
 }
 
-.control-value {
-  font-size: 0.95rem;
-  color: var(--ground-deep);
-  min-height: 1.3em;
-}
-
-/* --- Slider (Phase) --- */
-input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 220px;
-  height: 6px;
-  background: var(--paper-shadow);
-  border: 2px solid var(--outline-dark);
-  border-radius: var(--sketch-radius);
-  outline: none;
-  cursor: pointer;
-}
-
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--ocean-blue);
-  border: 3px solid var(--outline-dark);
-  cursor: grab;
-  box-shadow: 1px 2px 4px rgba(0,0,0,0.2);
-  transition: transform 0.1s ease;
-}
-
-input[type="range"]::-webkit-slider-thumb:active {
-  cursor: grabbing;
-  transform: scale(1.15);
-}
-
-input[type="range"]::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--ocean-blue);
-  border: 3px solid var(--outline-dark);
-  cursor: grab;
-  box-shadow: 1px 2px 4px rgba(0,0,0,0.2);
-}
-
-/* --- Dropdown (Location) --- */
+/* --- Dropdown (shared) --- */
 .select-wrapper {
   position: relative;
 }
 
 select {
   font-family: var(--font-hand);
-  font-size: 1rem;
-  padding: 6px 32px 6px 12px;
+  font-size: 0.95rem;
+  padding: 5px 30px 5px 10px;
   background: var(--paper-bg);
   border: 3px solid var(--outline-dark);
   border-radius: var(--sketch-radius-alt);
@@ -165,11 +102,10 @@ select {
   box-shadow: 2px 3px 0px var(--paper-shadow);
   appearance: none;
   -webkit-appearance: none;
-  /* Custom arrow */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1 L6 6 L11 1' stroke='%232C3E50' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 10px center;
-  min-width: 220px;
+  background-position: right 8px center;
+  min-width: 170px;
 }
 
 select:hover {
@@ -180,24 +116,122 @@ select:focus {
   border-color: var(--ocean-blue);
 }
 
-/* --- Responsive tweaks --- */
-@media (max-width: 600px) {
+/* --- Date Inputs --- */
+.date-group {
+  min-width: 220px;
+}
+
+.date-row {
+  display: flex;
+  gap: 10px;
+}
+
+.date-field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.date-label {
+  font-size: 0.8rem;
+  color: var(--ground-deep);
+}
+
+input[type="date"] {
+  font-family: var(--font-hand);
+  font-size: 0.9rem;
+  padding: 4px 8px;
+  background: var(--paper-bg);
+  border: 2.5px solid var(--outline-dark);
+  border-radius: var(--sketch-radius);
+  color: var(--ink);
+  outline: none;
+  cursor: pointer;
+  width: 130px;
+  box-shadow: 1px 2px 0px var(--paper-shadow);
+}
+
+input[type="date"]:focus {
+  border-color: var(--ocean-blue);
+}
+
+/* --- Play Button --- */
+.action-group {
+  gap: 6px;
+}
+
+#play-btn {
+  font-family: var(--font-hand);
+  font-size: 1.1rem;
+  font-weight: 400;
+  padding: 7px 22px;
+  background: var(--ocean-blue);
+  color: #fff;
+  border: 3px solid var(--outline-dark);
+  border-radius: var(--sketch-radius);
+  cursor: pointer;
+  box-shadow: 3px 4px 0px var(--outline-dark);
+  transition: transform 0.08s, box-shadow 0.08s;
+  user-select: none;
+  letter-spacing: 0.5px;
+}
+
+#play-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 5px 0px var(--outline-dark);
+}
+
+#play-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px var(--outline-dark);
+}
+
+#play-btn.playing {
+  background: var(--ground-warm);
+}
+
+/* --- Speed Row --- */
+.speed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.speed-label {
+  font-size: 0.85rem;
+  color: var(--ground-deep);
+}
+
+.speed-row select {
+  min-width: 60px;
+  font-size: 0.85rem;
+  padding: 3px 24px 3px 8px;
+}
+
+/* --- Responsive --- */
+@media (max-width: 700px) {
   #controls {
     flex-direction: column;
-    height: 180px;
-    gap: 12px;
-    padding: 10px 16px;
+    height: 200px;
+    gap: 8px;
+    padding: 8px 12px;
   }
 
   #scene {
-    height: calc(100vh - 180px);
+    height: calc(100vh - 200px);
   }
 
-  input[type="range"] {
-    width: 180px;
+  .date-row {
+    gap: 6px;
+  }
+
+  input[type="date"] {
+    width: 110px;
+    font-size: 0.8rem;
   }
 
   select {
-    min-width: 180px;
+    min-width: 140px;
   }
 }
