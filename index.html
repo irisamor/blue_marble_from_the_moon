@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Earthview from the Moon</title>
+  <meta name="description" content="An interactive 2D visualizer showing what the Earth looks like from the surface of the Moon.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="controls">
+    <div class="control-group">
+      <label for="phase-slider" class="control-label">☽ Earth Phase</label>
+      <input type="range" id="phase-slider" min="0" max="360" value="180" step="1">
+      <div id="phase-name" class="control-value">Full Earth</div>
+    </div>
+
+    <div class="control-group">
+      <label for="location-select" class="control-label">🌙 Location on the Moon</label>
+      <div class="select-wrapper">
+        <select id="location-select">
+          <option value="procellarum">Oceanus Procellarum</option>
+          <option value="tranquility">Sea of Tranquility</option>
+          <option value="southpole">Lunar South Pole</option>
+          <option value="farside">Far Side — Mare Moscoviense</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

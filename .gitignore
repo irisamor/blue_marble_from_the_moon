@@ -1,0 +1,54 @@
+# --- Antigravity & Agent Internals (The "Brain" on Disk) ---
+.antigravity/
+.gemini/
+.geminiignore
+
+# --- Agent Artifacts (Process Documentation) ---
+task_list.md
+implementation_plan.md
+task_progress_*.md
+walkthrough.md
+*.ag_artifact
+
+# --- Security & Secrets (CRITICAL) ---
+.env
+.env.*
+.env.local
+!.env.example
+!.env.sample
+!.env.template
+
+*.pem
+*.key
+id_rsa
+id_rsa.pub
+secrets.json
+credentials.json
+google-credentials.json
+mcp_config.json
+
+# --- Build Artifacts ---
+site/
+*.egg-info/
+
+# --- System & Dependencies (Context Window Economy) ---
+node_modules/
+dist/
+build/
+coverage/
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+obj/
+.DS_Store
+Thumbs.db
+
+# --- IDE Settings (Optional) ---
+.vscode/
+.idea/
+
+# --- Runs (Optional) ---
+runs/
+runs_test/
+runs_test_2/
